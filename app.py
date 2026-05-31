@@ -38,19 +38,117 @@ FACTOR_LABELS = {
     "downside_protection": "Downside Protection (Marks)",
 }
 
+METRIC_HELP = {
+    "composite_score": (
+        "Single number from 0–100 that blends how this stock ranks on value, quality, momentum, "
+        "and other factors vs similar companies. Higher = the model likes it more overall; "
+        "70+ is the default “good buy” bar in this app."
+    ),
+    "price": (
+        "What one share costs right now in dollars. This is market price, not a quality score—"
+        "use it with the other metrics to judge whether the stock looks expensive or cheap."
+    ),
+    "analyst_upside": (
+        "How far the average Wall Street 12‑month price target sits above or below today’s price, "
+        "in percent. Positive = analysts on average expect a higher price; negative = targets are "
+        "below the current price."
+    ),
+    "consensus": (
+        "The overall label analysts give this stock (e.g. Buy, Hold, Sell), averaged from their "
+        "published recommendations. It summarizes professional opinion, not a guarantee of "
+        "future performance."
+    ),
+    "lynch_peg": (
+        "Compares price to expected earnings growth and dividends (Peter Lynch’s “PEG” idea). "
+        "Higher values here suggest you may be paying less per unit of growth; Lynch often liked "
+        "values above 2. Below 1 can mean growth looks expensive relative to price."
+    ),
+    "graham_ratio": (
+        "Compares Benjamin Graham’s estimated fair price to today’s price. Above 1.0 means the "
+        "stock trades below that estimate (more “margin of safety”); below 1.0 means it trades "
+        "above it."
+    ),
+    "target_low": (
+        "The lowest 12‑month price target among analysts covering the stock. The market could "
+        "fall toward this level if those bearish views prove right."
+    ),
+    "target_mean": (
+        "The average 12‑month price target across analysts. “Analyst upside” compares this number "
+        "to the current share price."
+    ),
+    "target_high": (
+        "The highest 12‑month price target among analysts—a bullish ceiling some professionals "
+        "see if things go well."
+    ),
+    "upgrades_downgrades": (
+        "How many analysts recently raised their rating (upgrades) vs lowered it (downgrades). "
+        "More upgrades often means improving sentiment; more downgrades the opposite."
+    ),
+    "etf_price": "Latest market price for one ETF share in dollars.",
+    "etf_expense_ratio": (
+        "Annual fund fee as a percent of assets. Lower usually means more of the return stays "
+        "with you instead of going to the fund manager."
+    ),
+    "etf_category": "Broad type of fund (e.g. large-cap equity, bond) from the provider’s classification.",
+    "etf_yield": "Income paid out by the fund, shown as an annual percent of price (dividends/distributions).",
+}
 
-def render_factor_gauge(label: str, percentile: float | None) -> None:
+FACTOR_HELP = {
+    "value": (
+        "How cheap the stock looks vs peers using earnings, book value, and cash flow. "
+        "Higher percentile = relatively more “bang for your buck.”"
+    ),
+    "momentum": (
+        "How much the share price rose over the past year (excluding the last month). "
+        "Higher percentile = stronger recent price trend (“winners keep winning” idea)."
+    ),
+    "quality": (
+        "How profitable and efficient the business is (margins, returns on assets/equity). "
+        "Higher percentile = stronger underlying business quality."
+    ),
+    "low_volatility": (
+        "How steady the price has been—less day‑to‑day and year‑to‑year swinging. "
+        "Higher percentile = historically calmer, lower‑volatility stock."
+    ),
+    "investment": (
+        "Whether the company is rapidly growing its asset base (plants, acquisitions, etc.). "
+        "Research often favors companies that are not over‑investing; higher percentile = "
+        "less aggressive asset growth vs peers."
+    ),
+    "earnings_revisions": (
+        "Whether analyst estimates and sentiment have been moving up or down. "
+        "Higher percentile = more positive revision trend."
+    ),
+    "financial_strength": (
+        "Piotroski F‑Score style checklist (profitability, leverage, liquidity). "
+        "Higher percentile = healthier financial signals vs peers."
+    ),
+    "garp": (
+        "Growth at a reasonable price—same Lynch PEG family as the headline Lynch PEG metric, "
+        "ranked vs other stocks. Higher percentile = better growth‑for‑price vs peers."
+    ),
+    "balance_sheet_strength": (
+        "Cash vs debt and how leveraged the company is. Higher percentile = more cash cushion "
+        "and less debt stress relative to peers."
+    ),
+    "graham_value": (
+        "Classic Benjamin Graham checks (earnings, book value, liquidity). "
+        "Higher percentile = more attractive on these old‑school value measures vs peers."
+    ),
+    "downside_protection": (
+        "How severe past price drops and “bad day” volatility have been (Howard Marks–style). "
+        "Higher percentile = historically smaller drawdowns and gentler downside moves."
+    ),
+}
+
+
+def render_factor_gauge(label: str, percentile: float | None, help: str | None = None) -> None:
     import math
 
     unavailable = percentile is None or (isinstance(percentile, float) and math.isnan(percentile))
     pct = 50.0 if unavailable else float(percentile)
-    color = "#2ecc71" if pct >= 70 else "#f39c12" if pct >= 40 else "#e74c3c"
-    suffix = " _(insufficient data)_" if unavailable else f" — {pct:.0f}th percentile"
-    st.markdown(
-        f"**{label}**{suffix} "
-        f'<span style="color:{color}">{"●" if pct >= 70 else "○"}</span>',
-        unsafe_allow_html=True,
-    )
+    value = "Insufficient data" if unavailable else f"{pct:.0f}th percentile"
+    st.metric(label, value, help=help)
     st.progress(min(max(pct / 100, 0.0), 1.0))
 
 
@@ -58,10 +156,22 @@ def render_etf_view(ticker: str) -> None:
     info = fetch_etf_info(ticker)
     st.subheader(f"{info.get('name') or ticker} (ETF)")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Price", f"${info.get('current_price', 0):,.2f}" if info.get("current_price") else "N/A")
-    c2.metric("Expense Ratio", f"{(info.get('expense_ratio') or 0)*100:.2f}%" if info.get("expense_ratio") else "N/A")
-    c3.metric("Category", info.get("category") or "N/A")
-    c4.metric("Yield", f"{(info.get('yield') or 0)*100:.2f}%" if info.get("yield") else "N/A")
+    c1.metric(
+        "Price",
+        f"${info.get('current_price', 0):,.2f}" if info.get("current_price") else "N/A",
+        help=METRIC_HELP["etf_price"],
+    )
+    c2.metric(
+        "Expense Ratio",
+        f"{(info.get('expense_ratio') or 0)*100:.2f}%" if info.get("expense_ratio") else "N/A",
+        help=METRIC_HELP["etf_expense_ratio"],
+    )
+    c3.metric("Category", info.get("category") or "N/A", help=METRIC_HELP["etf_category"])
+    c4.metric(
+        "Yield",
+        f"{(info.get('yield') or 0)*100:.2f}%" if info.get("yield") else "N/A",
+        help=METRIC_HELP["etf_yield"],
+    )
 
     st.info("ETFs are excluded from empirical factor scoring. Showing basic fund info only.")
 
@@ -95,10 +205,26 @@ def render_stock_view(ticker: str, config: dict) -> None:
     composite = analysis.get("composite")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Composite Score", f"{composite:.1f}" if composite is not None else "N/A")
-    c2.metric("Price", f"${analysis.get('price', 0):,.2f}" if analysis.get("price") else "N/A")
-    c3.metric("Analyst Upside", f"{analyst.get('implied_upside_pct', 0):.1f}%" if analyst.get("implied_upside_pct") is not None else "N/A")
-    c4.metric("Consensus", analyst.get("consensus_label", "N/A"))
+    c1.metric(
+        "Composite Score",
+        f"{composite:.1f}" if composite is not None else "N/A",
+        help=METRIC_HELP["composite_score"],
+    )
+    c2.metric(
+        "Price",
+        f"${analysis.get('price', 0):,.2f}" if analysis.get("price") else "N/A",
+        help=METRIC_HELP["price"],
+    )
+    c3.metric(
+        "Analyst Upside",
+        f"{analyst.get('implied_upside_pct', 0):.1f}%" if analyst.get("implied_upside_pct") is not None else "N/A",
+        help=METRIC_HELP["analyst_upside"],
+    )
+    c4.metric(
+        "Consensus",
+        analyst.get("consensus_label", "N/A"),
+        help=METRIC_HELP["consensus"],
+    )
 
     thresholds = get_thresholds(config)
     if analysis.get("is_good_buy"):
@@ -113,13 +239,13 @@ def render_stock_view(ticker: str, config: dict) -> None:
     book_cols[0].metric(
         "Lynch PEG",
         f"{peg:.2f}" if peg is not None else "N/A",
-        help="Dividend-adjusted PEG (growth% + yield%) / P/E; Lynch: >2 is attractive",
+        help=METRIC_HELP["lynch_peg"],
     )
     graham_ratio = factors_raw.get("graham_ratio")
     book_cols[1].metric(
         "Graham Ratio",
         f"{graham_ratio:.2f}" if graham_ratio is not None else "N/A",
-        help="Graham fair value / price; >1 means below Graham Number",
+        help=METRIC_HELP["graham_ratio"],
     )
 
     col_left, col_right = st.columns([1, 1])
@@ -129,7 +255,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
         breakdown = analysis.get("factor_breakdown", {})
         for family, label in FACTOR_LABELS.items():
             fb = breakdown.get(family, {})
-            render_factor_gauge(label, fb.get("percentile"))
+            render_factor_gauge(label, fb.get("percentile"), help=FACTOR_HELP.get(family))
 
         # Radar chart
         import math
@@ -168,11 +294,27 @@ def render_stock_view(ticker: str, config: dict) -> None:
             st.write(f"Consensus: **{analyst.get('consensus_label', 'Unknown')}**")
 
         t1, t2, t3 = st.columns(3)
-        t1.metric("Target Low", f"${analyst.get('target_low', 0):,.2f}" if analyst.get("target_low") else "N/A")
-        t2.metric("Target Mean", f"${analyst.get('target_mean', 0):,.2f}" if analyst.get("target_mean") else "N/A")
-        t3.metric("Target High", f"${analyst.get('target_high', 0):,.2f}" if analyst.get("target_high") else "N/A")
+        t1.metric(
+            "Target Low",
+            f"${analyst.get('target_low', 0):,.2f}" if analyst.get("target_low") else "N/A",
+            help=METRIC_HELP["target_low"],
+        )
+        t2.metric(
+            "Target Mean",
+            f"${analyst.get('target_mean', 0):,.2f}" if analyst.get("target_mean") else "N/A",
+            help=METRIC_HELP["target_mean"],
+        )
+        t3.metric(
+            "Target High",
+            f"${analyst.get('target_high', 0):,.2f}" if analyst.get("target_high") else "N/A",
+            help=METRIC_HELP["target_high"],
+        )
 
-        st.metric("Recent Upgrades / Downgrades", f"{analyst.get('recent_upgrades', 0)} / {analyst.get('recent_downgrades', 0)}")
+        st.metric(
+            "Recent Upgrades / Downgrades",
+            f"{analyst.get('recent_upgrades', 0)} / {analyst.get('recent_downgrades', 0)}",
+            help=METRIC_HELP["upgrades_downgrades"],
+        )
 
         actions = analyst.get("recent_actions", [])
         if actions:

@@ -9,7 +9,10 @@ watchlist:
   - MSFT
   - GOOGL
   - NVDA
-  - JPM
+  - AMZN
+  - META
+  - BRK.B
+  - COST
 
 thresholds:
   composite_min: 70

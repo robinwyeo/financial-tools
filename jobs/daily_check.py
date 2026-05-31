@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def run_daily(
     refresh_universe: bool = True,
-    max_universe: int | None = 100,
+    max_universe: int | None = None,
     send_alerts: bool = True,
     fast_universe: bool = False,
 ) -> int:
@@ -82,7 +82,7 @@ def run_daily(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily stock metrics check")
     parser.add_argument("--no-refresh", action="store_true", help="Skip universe refresh")
-    parser.add_argument("--max-universe", type=int, default=100, help="Max tickers in universe refresh")
+    parser.add_argument("--max-universe", type=int, default=None, help="Max tickers in universe refresh (default: full list)")
     parser.add_argument("--no-email", action="store_true", help="Skip email sending")
     parser.add_argument("--fast", action="store_true", help="Use smaller fallback universe")
     args = parser.parse_args()

@@ -46,6 +46,91 @@ def _score_to_label(score: float) -> str:
     return "Sell"
 
 
+def _is_period_aggregate_format(col_map: dict[str, str]) -> bool:
+    return "strongbuy" in col_map and "buy" in col_map and "hold" in col_map
+
+
+def _period_row(df: pd.DataFrame, col_map: dict[str, str], period: str) -> pd.Series | None:
+    period_col = col_map.get("period")
+    if period_col is None:
+        return None
+    rows = df[df[period_col] == period]
+    if rows.empty:
+        return None
+    return rows.iloc[0]
+
+
+def _bucket_counts(row: pd.Series, col_map: dict[str, str]) -> dict[str, int]:
+    return {
+        "strong_buy": int(row.get(col_map["strongbuy"], 0) or 0),
+        "buy": int(row.get(col_map["buy"], 0) or 0),
+        "hold": int(row.get(col_map["hold"], 0) or 0),
+        "sell": int(row.get(col_map["sell"], 0) or 0) if "sell" in col_map else 0,
+        "strong_sell": int(row.get(col_map["strongsell"], 0) or 0) if "strongsell" in col_map else 0,
+    }
+
+
+def _weighted_mean_from_buckets(counts: dict[str, int]) -> float | None:
+    total = sum(counts.values())
+    if total == 0:
+        return None
+    weighted = (
+        counts["strong_buy"] * 5
+        + counts["buy"] * 4
+        + counts["hold"] * 3
+        + counts["sell"] * 2
+        + counts["strong_sell"] * 1
+    )
+    return weighted / total
+
+
+def _buy_hold_sell_from_buckets(counts: dict[str, int]) -> tuple[int, int, int]:
+    buy = counts["strong_buy"] + counts["buy"]
+    hold = counts["hold"]
+    sell = counts["sell"] + counts["strong_sell"]
+    return buy, hold, sell
+
+
+def recommendation_period_shift(
+    recs: pd.DataFrame,
+) -> tuple[float | None, int, int]:
+    """
+    Sentiment shift from yfinance period aggregates (0m vs -1m).
+    Returns (revision_score, buy-side upgrades, buy-side downgrades).
+    """
+    if recs is None or recs.empty:
+        return None, 0, 0
+
+    col_map = {c.lower(): c for c in recs.columns}
+    if not _is_period_aggregate_format(col_map):
+        return None, 0, 0
+
+    current = _period_row(recs, col_map, "0m")
+    prior = _period_row(recs, col_map, "-1m")
+    if current is None:
+        current = recs.iloc[0]
+    if prior is None:
+        return None, 0, 0
+
+    current_counts = _bucket_counts(current, col_map)
+    prior_counts = _bucket_counts(prior, col_map)
+
+    current_mean = _weighted_mean_from_buckets(current_counts)
+    prior_mean = _weighted_mean_from_buckets(prior_counts)
+    revision_score = None
+    if current_mean is not None and prior_mean is not None:
+        revision_score = float(current_mean - prior_mean)
+
+    buy_current, _, sell_current = _buy_hold_sell_from_buckets(current_counts)
+    buy_prior, _, sell_prior = _buy_hold_sell_from_buckets(prior_counts)
+    net_bullish_current = buy_current - sell_current
+    net_bullish_prior = buy_prior - sell_prior
+    net_change = net_bullish_current - net_bullish_prior
+    upgrades = max(0, net_change)
+    downgrades = max(0, -net_change)
+    return revision_score, upgrades, downgrades
+
+
 def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
     """
     Aggregate analyst recommendations, price targets, and implied upside.
@@ -58,32 +143,25 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
     num_analysts = raw.get("num_analysts")
     recs: pd.DataFrame = raw.get("recommendations", pd.DataFrame())
 
-    # Distribution from recommendation history if available
     buy_count = hold_count = sell_count = 0
     recent_actions: list[dict] = []
+    upgrades = downgrades = 0
 
     if recs is not None and not recs.empty:
         df = recs.copy()
         col_map = {c.lower(): c for c in df.columns}
 
-        # New yfinance format: period-based aggregate counts
-        # Columns: period, strongBuy, buy, hold, sell, strongSell
-        if "strongbuy" in col_map and "buy" in col_map and "hold" in col_map:
+        if _is_period_aggregate_format(col_map):
             period_col = col_map.get("period")
             if period_col is not None:
                 current_rows = df[df[period_col] == "0m"]
                 row = current_rows.iloc[0] if not current_rows.empty else df.iloc[0]
             else:
                 row = df.iloc[0]
-            buy_count = int(row.get(col_map["strongbuy"], 0) or 0) + int(row.get(col_map["buy"], 0) or 0)
-            hold_count = int(row.get(col_map["hold"], 0) or 0)
-            sell_count = (
-                int(row.get(col_map["sell"], 0) or 0) if "sell" in col_map else 0
-            ) + (
-                int(row.get(col_map["strongsell"], 0) or 0) if "strongsell" in col_map else 0
-            )
+            counts = _bucket_counts(row, col_map)
+            buy_count, hold_count, sell_count = _buy_hold_sell_from_buckets(counts)
+            _, upgrades, downgrades = recommendation_period_shift(df)
         else:
-            # Legacy format: individual recommendation rows with toGrade / rating column
             grade_col = col_map.get("tograde") or col_map.get("to_grade") or col_map.get("rating")
             firm_col = col_map.get("firm")
             action_col = col_map.get("action")
@@ -109,9 +187,19 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
+            upgrades = sum(
+                1
+                for a in recent_actions
+                if "up" in a.get("action", "").lower() or "raise" in a.get("action", "").lower()
+            )
+            downgrades = sum(
+                1
+                for a in recent_actions
+                if "down" in a.get("action", "").lower() or "lower" in a.get("action", "").lower()
+            )
+
     total = buy_count + hold_count + sell_count
     if total == 0 and info_key:
-        # Fallback from consensus key
         score = _rating_to_score(info_key)
         if score is not None:
             if score >= 4:
@@ -123,9 +211,20 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
             total = 1
 
     mean_rating = None
-    if total > 0:
+    if recs is not None and not recs.empty:
+        col_map = {c.lower(): c for c in recs.columns}
+        if _is_period_aggregate_format(col_map):
+            period_col = col_map.get("period")
+            row = recs.iloc[0]
+            if period_col is not None:
+                current_rows = recs[recs[period_col] == "0m"]
+                if not current_rows.empty:
+                    row = current_rows.iloc[0]
+            mean_rating = _weighted_mean_from_buckets(_bucket_counts(row, col_map))
+
+    if mean_rating is None and total > 0:
         mean_rating = (buy_count * 4.5 + hold_count * 3.0 + sell_count * 1.5) / total
-    elif info_key:
+    elif mean_rating is None and info_key:
         mean_rating = _rating_to_score(info_key)
 
     consensus_label = _score_to_label(mean_rating) if mean_rating else "Unknown"
@@ -133,11 +232,6 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
     implied_upside_pct = None
     if price and target_mean and price > 0:
         implied_upside_pct = ((target_mean / price) - 1.0) * 100
-
-    upgrades = sum(1 for a in recent_actions if "up" in a.get("action", "").lower() or "raise" in a.get("action", "").lower())
-    downgrades = sum(
-        1 for a in recent_actions if "down" in a.get("action", "").lower() or "lower" in a.get("action", "").lower()
-    )
 
     return {
         "consensus_label": consensus_label,

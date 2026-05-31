@@ -71,6 +71,33 @@ def zscore_to_percentile(z: float | None) -> float | None:
     return float(norm_cdf(z) * 100)
 
 
+def _composite_and_coverage(
+    row: pd.Series,
+    weights: dict[str, float],
+) -> tuple[float | None, float]:
+    """Weighted composite using only factors with data; returns (composite, coverage_pct)."""
+    weighted_sum = 0.0
+    weight_available = 0.0
+    weight_total = sum(weights.get(family, 0) for family in FACTOR_SCORE_COLUMNS)
+
+    for family in FACTOR_SCORE_COLUMNS:
+        pct_col = f"pct_{family}"
+        if pct_col not in row.index:
+            continue
+        pct = row[pct_col]
+        w = weights.get(family, 0)
+        if pct is not None and not (isinstance(pct, float) and np.isnan(pct)):
+            weighted_sum += float(pct) * w
+            weight_available += w
+
+    if weight_available == 0:
+        return None, 0.0
+
+    composite = weighted_sum / weight_available
+    coverage = (weight_available / weight_total * 100.0) if weight_total > 0 else 0.0
+    return composite, coverage
+
+
 def score_universe_df(
     factors_df: pd.DataFrame,
     config: dict[str, Any] | None = None,
@@ -102,19 +129,14 @@ def score_universe_df(
 
         result[pct_col] = result[z_col].apply(zscore_to_percentile)
 
-    # Weighted composite from percentiles
-    pct_cols = [f"pct_{f}" for f in FACTOR_SCORE_COLUMNS if f"pct_{f}" in result.columns]
-    composite = pd.Series(0.0, index=result.index)
-    weight_sum = 0.0
-    for family in FACTOR_SCORE_COLUMNS:
-        pct_col = f"pct_{family}"
-        w = weights.get(family, 0)
-        if pct_col in result.columns:
-            composite += result[pct_col].fillna(50) * w
-            weight_sum += w
-    if weight_sum > 0:
-        composite = composite / weight_sum
-    result["composite"] = composite
+    composites = []
+    coverages = []
+    for _, row in result.iterrows():
+        composite, coverage = _composite_and_coverage(row, weights)
+        composites.append(composite)
+        coverages.append(coverage)
+    result["composite"] = composites
+    result["factor_coverage_pct"] = coverages
 
     return result
 
@@ -163,6 +185,7 @@ def score_ticker(
 
     thresholds = cfg.get("thresholds", {})
     composite = scored_row.get("composite")
+    factor_coverage_pct = scored_row.get("factor_coverage_pct")
     implied_upside = analyst.get("implied_upside_pct")
     is_good_buy = _evaluate_good_buy(
         composite,
@@ -187,10 +210,12 @@ def score_ticker(
         "price": raw.get("price"),
         "is_etf": False,
         "composite": composite,
+        "factor_coverage_pct": factor_coverage_pct,
         "factor_breakdown": factor_breakdown,
         "factors_raw": factors,
         "analyst": analyst,
         "is_good_buy": is_good_buy,
+        "data_warnings": raw.get("data_warnings", []),
         "scored_row": scored_row,
     }
 
@@ -223,10 +248,12 @@ def _score_without_universe(
         "price": raw.get("price"),
         "is_etf": False,
         "composite": None,
+        "factor_coverage_pct": 0.0,
         "factor_breakdown": factor_breakdown,
         "factors_raw": factors,
         "analyst": analyst,
         "is_good_buy": False,
+        "data_warnings": raw.get("data_warnings", []),
         "warning": "Universe snapshot missing. Run jobs/daily_check.py or core/universe.py to build it.",
     }
 

@@ -109,6 +109,13 @@ To rebuild with more tickers for better cross-sections:
 python -m core.universe --max 100   # or full S&P 500 without --max
 ```
 
+## Tests
+
+```bash
+pip install -r requirements.txt
+pytest tests/ -v
+```
+
 ## Disclaimer
 
 This tool is for informational purposes only. Not investment advice.

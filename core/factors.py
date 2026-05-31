@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from core.analysts import recommendation_period_shift
+
 
 def _ratio(num: float | None, den: float | None) -> float | None:
     if num is None or den is None or den == 0:
@@ -103,7 +105,6 @@ def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
     score = None
 
     if recs is not None and not recs.empty:
-        # Recent recommendation sentiment shift
         df = recs.copy()
         col_map = {c.lower(): c for c in df.columns}
         action_col = col_map.get("action") or col_map.get("rating")
@@ -112,14 +113,17 @@ def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
             upgrades = recent[action_col].astype(str).str.lower().str.contains("up|raise|buy", na=False).sum()
             downgrades = recent[action_col].astype(str).str.lower().str.contains("down|lower|sell", na=False).sum()
             score = float(upgrades - downgrades)
+        else:
+            period_score, _, _ = recommendation_period_shift(df)
+            if period_score is not None:
+                score = period_score * 10.0
 
-    # Blend with implied target upside as secondary signal
     price = raw.get("price")
     target = raw.get("target_mean")
     if price and target and price > 0:
         upside = (target / price) - 1.0
         if score is None:
-            score = upside * 5  # scale to roughly comparable range
+            score = upside * 5
         else:
             score = 0.6 * score + 0.4 * (upside * 5)
 
@@ -210,7 +214,8 @@ def compute_piotroski_f_score(raw: dict[str, Any]) -> dict[str, float | None]:
     if checks == 0:
         return {"piotroski_f_score": None, "financial_strength": None}
 
-    return {"piotroski_f_score": float(score), "financial_strength": float(score)}
+    normalized = (score / checks) * 9.0
+    return {"piotroski_f_score": float(score), "financial_strength": float(normalized)}
 
 
 def _pct_from_decimal(val: float | None) -> float | None:

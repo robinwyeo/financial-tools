@@ -65,6 +65,80 @@ def _safe_float(val: Any) -> float | None:
         return None
 
 
+def normalize_debt_to_equity(val: float | None) -> float | None:
+    """Yahoo reports debt/equity as a percentage (e.g. 286 = 2.86x); convert to ratio."""
+    if val is None:
+        return None
+    if abs(val) > 10:
+        return val / 100.0
+    return val
+
+
+def _financial_columns_newest_first(df: pd.DataFrame) -> list:
+    """Return financial statement column labels sorted newest-first."""
+    if df.empty:
+        return []
+
+    def _col_date(col: Any) -> pd.Timestamp:
+        try:
+            return pd.to_datetime(col)
+        except (TypeError, ValueError):
+            return pd.NaT
+
+    dated = [(col, _col_date(col)) for col in df.columns]
+    dated.sort(key=lambda item: (pd.isna(item[1]), item[1]), reverse=True)
+    dated_cols = [col for col, dt in dated if pd.notna(dt)]
+    return dated_cols if dated_cols else list(df.columns)
+
+
+def extract_financial_values(
+    col_names: list[str],
+    df: pd.DataFrame,
+) -> tuple[float | None, float | None, list[str]]:
+    """
+    Return (latest, prior, warnings) for the first matching financial statement row.
+    Columns are read in date order (newest first).
+    """
+    warnings: list[str] = []
+    if df.empty:
+        return None, None, warnings
+
+    sorted_cols = _financial_columns_newest_first(df)
+    for name in col_names:
+        if name not in df.index:
+            continue
+        row = df.loc[name]
+        ordered: list[tuple[str, float]] = []
+        for col in sorted_cols:
+            if col not in row.index:
+                continue
+            fv = _safe_float(row[col])
+            if fv is not None:
+                ordered.append((str(col), fv))
+        if not ordered:
+            continue
+
+        latest_val = ordered[0][1]
+        prior_val = ordered[1][1] if len(ordered) >= 2 else None
+        if sorted_cols and sorted_cols[0] in row.index and _safe_float(row[sorted_cols[0]]) is None:
+            warnings.append(
+                f"{name}: most recent period ({sorted_cols[0]}) empty; using {ordered[0][0]}"
+            )
+        return latest_val, prior_val, warnings
+
+    return None, None, warnings
+
+
+def latest_financial(col_names: list[str], df: pd.DataFrame) -> float | None:
+    latest, _, _ = extract_financial_values(col_names, df)
+    return latest
+
+
+def prior_financial(col_names: list[str], df: pd.DataFrame) -> float | None:
+    _, prior, _ = extract_financial_values(col_names, df)
+    return prior
+
+
 def is_etf(ticker: str) -> bool:
     """Return True if ticker appears to be an ETF."""
     cache_path = _cache_key("etf", ticker.upper())
@@ -262,67 +336,47 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     income = fin["income"]
     balance = fin["balance"]
     cashflow = fin["cashflow"]
+    data_warnings: list[str] = []
 
-    # Latest annual columns (yfinance: columns are dates, most recent first)
-    def latest(col_names: list[str], df: pd.DataFrame) -> float | None:
-        if df.empty:
-            return None
-        for name in col_names:
-            if name in df.index:
-                row = df.loc[name]
-                for v in row:
-                    fv = _safe_float(v)
-                    if fv is not None:
-                        return fv
-        return None
+    def _fin(col_names: list[str], df: pd.DataFrame) -> tuple[float | None, float | None]:
+        latest, prior, warns = extract_financial_values(col_names, df)
+        data_warnings.extend(warns)
+        return latest, prior
 
-    def prior(col_names: list[str], df: pd.DataFrame) -> float | None:
-        if df.empty:
-            return None
-        for name in col_names:
-            if name in df.index:
-                row = df.loc[name]
-                vals = [_safe_float(v) for v in row]
-                vals = [v for v in vals if v is not None]
-                if len(vals) >= 2:
-                    return vals[1]
-        return None
+    (total_assets, total_assets_prior) = _fin(["Total Assets"], balance)
+    (total_liabilities, total_liabilities_prior) = _fin(
+        ["Total Liabilities Net Minority Interest", "Total Liabilities"], balance
+    )
+    (current_assets, current_assets_prior) = _fin(["Current Assets"], balance)
+    (current_liabilities, current_liabilities_prior) = _fin(["Current Liabilities"], balance)
+    (long_term_debt, long_term_debt_prior) = _fin(
+        ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], balance
+    )
+    (_, shares_prior) = _fin(["Ordinary Shares Number", "Share Issued"], balance)
 
-    total_assets = latest(["Total Assets"], balance)
-    total_assets_prior = prior(["Total Assets"], balance)
-    total_liabilities = latest(["Total Liabilities Net Minority Interest", "Total Liabilities"], balance)
-    total_liabilities_prior = prior(["Total Liabilities Net Minority Interest", "Total Liabilities"], balance)
-    current_assets = latest(["Current Assets"], balance)
-    current_liabilities = latest(["Current Liabilities"], balance)
-    current_assets_prior = prior(["Current Assets"], balance)
-    current_liabilities_prior = prior(["Current Liabilities"], balance)
-    long_term_debt = latest(["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], balance)
-    long_term_debt_prior = prior(["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], balance)
-    shares_prior = prior(["Ordinary Shares Number", "Share Issued"], balance)
+    (gross_profit, gross_profit_prior) = _fin(["Gross Profit"], income)
+    (net_income, net_income_prior) = _fin(["Net Income", "Net Income Common Stockholders"], income)
+    (ebit, _) = _fin(["EBIT", "Operating Income"], income)
+    (revenue, revenue_prior) = _fin(["Total Revenue", "Operating Revenue"], income)
+    (operating_income, _) = _fin(["Operating Income"], income)
 
-    gross_profit = latest(["Gross Profit"], income)
-    net_income = latest(["Net Income", "Net Income Common Stockholders"], income)
-    net_income_prior = prior(["Net Income", "Net Income Common Stockholders"], income)
-    ebit = latest(["EBIT", "Operating Income"], income)
-    revenue = latest(["Total Revenue", "Operating Revenue"], income)
-    revenue_prior = prior(["Total Revenue", "Operating Revenue"], income)
-    operating_income = latest(["Operating Income"], income)
-
-    operating_cashflow = latest(["Operating Cash Flow"], cashflow)
-    free_cashflow = latest(["Free Cash Flow"], cashflow)
-    dividends_paid = latest(
+    (operating_cashflow, _) = _fin(["Operating Cash Flow"], cashflow)
+    (free_cashflow, _) = _fin(["Free Cash Flow"], cashflow)
+    (dividends_paid, _) = _fin(
         ["Cash Dividends Paid", "Common Stock Dividend Paid", "Payment Of Dividends", "Dividends Paid"],
         cashflow,
     )
-    repurchase_of_stock = latest(
-        ["Repurchase Of Capital Stock", "Common Stock Payments", "Repurchase Of Common Stock",
-         "Purchase Of Business", "Repurchase Of Stock"],
+    (repurchase_of_stock, _) = _fin(
+        [
+            "Repurchase Of Capital Stock",
+            "Common Stock Payments",
+            "Repurchase Of Common Stock",
+            "Repurchase Of Stock",
+        ],
         cashflow,
     )
 
-    gross_profit_prior = prior(["Gross Profit"], income)
-    total_assets_for_turnover_prior = total_assets_prior
-    retained_earnings = latest(
+    (retained_earnings, _) = _fin(
         ["Retained Earnings", "Retained Earnings Total Equity", "Retained Earnings Accumulated Deficit"],
         balance,
     )
@@ -340,7 +394,7 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     trailing_peg_ratio = _safe_float(info.get("trailingPegRatio"))
     total_cash = _safe_float(info.get("totalCash"))
     total_debt = _safe_float(info.get("totalDebt"))
-    debt_to_equity = _safe_float(info.get("debtToEquity"))
+    debt_to_equity = normalize_debt_to_equity(_safe_float(info.get("debtToEquity")))
     current_ratio_info = _safe_float(info.get("currentRatio"))
 
     # Analyst targets from info
@@ -408,6 +462,7 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "num_analysts": num_analysts,
         "recommendations": recs,
         "price_history": hist,
+        "data_warnings": data_warnings,
     }
 
 

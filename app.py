@@ -58,7 +58,8 @@ METRIC_HELP = {
     "composite_score": (
         "Single number from 0–100 that blends how this stock ranks on value, quality, momentum, "
         "and other factors vs similar companies. Higher = the model likes it more overall; "
-        "70+ is the default “good buy” bar in this app."
+        "70+ is the default “good buy” bar in this app. Only factors with available data are "
+        "included; check Factor Coverage to see how complete the score is."
     ),
     "price": (
         "What one share costs right now in dollars. This is market price, not a quality score—"
@@ -213,9 +214,11 @@ def render_factor_gauge(label: str, percentile: float | None, help: str | None =
     import math
 
     unavailable = percentile is None or (isinstance(percentile, float) and math.isnan(percentile))
-    pct = 50.0 if unavailable else float(percentile)
-    value = "Insufficient data" if unavailable else f"{pct:.0f}th percentile"
-    st.metric(label, value, help=help)
+    if unavailable:
+        st.metric(label, "N/A", help=help)
+        return
+    pct = float(percentile)
+    st.metric(label, f"{pct:.0f}th percentile", help=help)
     st.progress(min(max(pct / 100, 0.0), 1.0))
 
 
@@ -270,28 +273,40 @@ def render_stock_view(ticker: str, config: dict) -> None:
 
     analyst = analysis.get("analyst", {})
     composite = analysis.get("composite")
+    factor_coverage = analysis.get("factor_coverage_pct")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric(
         "Composite Score",
         f"{composite:.1f}" if composite is not None else "N/A",
         help=METRIC_HELP["composite_score"],
     )
     c2.metric(
+        "Factor Coverage",
+        f"{factor_coverage:.0f}%" if factor_coverage is not None else "N/A",
+        help="Share of composite weight backed by computed factor percentiles (not imputed).",
+    )
+    c3.metric(
         "Price",
         f"${analysis.get('price', 0):,.2f}" if analysis.get("price") else "N/A",
         help=METRIC_HELP["price"],
     )
-    c3.metric(
+    c4.metric(
         "Analyst Upside",
         f"{analyst.get('implied_upside_pct', 0):.1f}%" if analyst.get("implied_upside_pct") is not None else "N/A",
         help=METRIC_HELP["analyst_upside"],
     )
-    c4.metric(
+    c5.metric(
         "Consensus",
         analyst.get("consensus_label", "N/A"),
         help=METRIC_HELP["consensus"],
     )
+
+    data_warnings = analysis.get("data_warnings") or []
+    if data_warnings:
+        with st.expander("Data warnings", expanded=False):
+            for warning in data_warnings:
+                st.warning(warning)
 
     thresholds = get_thresholds(config)
     if analysis.get("is_good_buy"):
@@ -330,12 +345,18 @@ def render_stock_view(ticker: str, config: dict) -> None:
         import math
 
         families = list(FACTOR_LABELS.keys())
+        raw_values = [breakdown.get(f, {}).get("percentile") for f in families]
+        available = [
+            float(v)
+            for v in raw_values
+            if v is not None and not (isinstance(v, float) and math.isnan(v))
+        ]
+        fill = sum(available) / len(available) if available else 50.0
         values = [
-            50.0 if (
-                (v := breakdown.get(f, {}).get("percentile")) is None
-                or (isinstance(v, float) and math.isnan(v))
-            ) else float(v)
-            for f in families
+            float(v)
+            if v is not None and not (isinstance(v, float) and math.isnan(v))
+            else fill
+            for v in raw_values
         ]
         fig = go.Figure(
             data=go.Scatterpolar(

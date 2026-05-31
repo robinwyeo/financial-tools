@@ -31,7 +31,7 @@ jobs:
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        run: python jobs/daily_check.py --max-universe 100
+        run: python jobs/daily_check.py
 
       - name: Commit updated snapshot
         run: |

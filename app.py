@@ -249,6 +249,25 @@ def fmt_large_number(n: float | None) -> str:
     return f"${n:,.0f}"
 
 
+def percentile_color(pct: float | None) -> str:
+    """Smooth red → orange → yellow gradient based on percentile rank (0=red, 100=yellow)."""
+    if pct is None or (isinstance(pct, float) and math.isnan(pct)):
+        return "#d1d5db"
+    p = max(0.0, min(100.0, float(pct))) / 100.0
+    # Anchor colors: red (0), orange (0.5), yellow (1.0)
+    if p <= 0.5:
+        t = p * 2
+        r = int(0xef + t * (0xf9 - 0xef))
+        g = int(0x44 + t * (0x73 - 0x44))
+        b = int(0x44 + t * (0x16 - 0x44))
+    else:
+        t = (p - 0.5) * 2
+        r = int(0xf9 + t * (0xea - 0xf9))
+        g = int(0x73 + t * (0xb3 - 0x73))
+        b = int(0x16 + t * (0x08 - 0x16))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def score_label_and_color(score: float | None) -> tuple[str, str]:
     if score is None:
         return "N/A", "#6b7280"
@@ -480,16 +499,14 @@ def render_factor_scorecard_card(analysis: dict) -> None:
         for family, short_label in SHORT_FACTOR_LABELS.items():
             fb = breakdown.get(family, {})
             pct = fb.get("percentile")
-            color = FACTOR_COLORS.get(family, "#6b7280")
+            color = percentile_color(pct)
 
             if pct is None or (isinstance(pct, float) and math.isnan(pct)):
                 bar_w = 0
                 pct_text = "N/A"
-                pct_color = "#d1d5db"
             else:
                 bar_w = min(max(float(pct), 0), 100)
                 pct_text = ordinal(int(round(float(pct))))
-                pct_color = color
 
             rows.append(
                 f'<div style="display:flex;align-items:center;gap:9px;margin:4px 0;">'
@@ -498,7 +515,7 @@ def render_factor_scorecard_card(analysis: dict) -> None:
                 f'<div style="flex:1;background:#f3f4f6;border-radius:4px;height:8px;overflow:hidden;">'
                 f'<div style="width:{bar_w:.0f}%;height:8px;border-radius:4px;background:{color};"></div>'
                 f'</div>'
-                f'<div style="width:36px;font-size:0.78rem;font-weight:600;color:{pct_color};'
+                f'<div style="width:36px;font-size:0.78rem;font-weight:600;color:{color};'
                 f'text-align:right;flex-shrink:0;">{pct_text}</div>'
                 f'</div>'
             )
@@ -796,7 +813,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     col_a, col_b = st.columns(2)
 
     with col_a:
-        with st.expander("Analyst Recommendations"):
+        with st.expander("Analyst Recommendations", expanded=True):
             total = (
                 analyst.get("buy_count", 0)
                 + analyst.get("hold_count", 0)
@@ -846,7 +863,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
                 st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
 
     with col_b:
-        with st.expander("Factor Radar"):
+        with st.expander("Factor Radar", expanded=True):
             breakdown = analysis.get("factor_breakdown", {})
             families = list(FACTOR_LABELS.keys())
             raw_vals = [breakdown.get(f, {}).get("percentile") for f in families]

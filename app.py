@@ -24,6 +24,18 @@ st.set_page_config(
     layout="wide",
 )
 
+PRICE_HISTORY_RANGES: dict[str, str] = {
+    "Last month": "1mo",
+    "Last 3 months": "3mo",
+    "Last 6 months": "6mo",
+    "YTD": "ytd",
+    "1 year": "1y",
+    "2 year": "2y",
+    "5 year": "5y",
+    "All-time": "max",
+}
+DEFAULT_PRICE_HISTORY_RANGE = "2 year"
+
 FACTOR_LABELS = {
     "value": "Value",
     "momentum": "Momentum (12-1)",
@@ -166,6 +178,37 @@ FACTOR_HELP = {
 }
 
 
+def render_price_history(ticker: str) -> None:
+    """Price chart with selectable lookback; default is 2 year."""
+    range_labels = list(PRICE_HISTORY_RANGES.keys())
+    default_idx = range_labels.index(DEFAULT_PRICE_HISTORY_RANGE)
+
+    header_col, range_col = st.columns([4, 1])
+    with header_col:
+        st.markdown("### Price History")
+    with range_col:
+        selected_range = st.selectbox(
+            "Timeframe",
+            options=range_labels,
+            index=default_idx,
+            label_visibility="collapsed",
+        )
+
+    period = PRICE_HISTORY_RANGES[selected_range]
+    hist = fetch_price_history(ticker, period=period)
+    if hist.empty:
+        st.info("No price history available for this timeframe.")
+        return
+
+    fig = px.line(
+        hist.reset_index(),
+        x="Date",
+        y="Close",
+        title=f"{ticker} — {selected_range}",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_factor_gauge(label: str, percentile: float | None, help: str | None = None) -> None:
     import math
 
@@ -272,6 +315,8 @@ def render_stock_view(ticker: str, config: dict) -> None:
         help=METRIC_HELP["graham_ratio"],
     )
 
+    render_price_history(ticker)
+
     col_left, col_right = st.columns([1, 1])
 
     with col_left:
@@ -344,12 +389,6 @@ def render_stock_view(ticker: str, config: dict) -> None:
         if actions:
             st.markdown("**Recent Actions**")
             st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
-
-    hist = fetch_price_history(ticker, period="2y")
-    if not hist.empty:
-        st.markdown("### Price History")
-        fig = px.line(hist.reset_index(), x="Date", y="Close", title=f"{ticker} — 2Y Price")
-        st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Raw factor values"):
         st.json(analysis.get("factors_raw", {}))

@@ -453,7 +453,8 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Settings")
-        ticker = st.text_input("Ticker", value="AAPL").upper().strip()
+        default_ticker = st.query_params.get("ticker", "AAPL")
+        ticker = st.text_input("Ticker", value=default_ticker).upper().strip()
         st.markdown("---")
         st.markdown("**Good-buy thresholds**")
         thresholds = get_thresholds(config)

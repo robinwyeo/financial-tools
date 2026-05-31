@@ -130,12 +130,23 @@ def fetch_ticker_info(ticker: str) -> dict[str, Any]:
         return {}
 
 
+def _records_to_df(records: list[dict]) -> pd.DataFrame:
+    """Restore a financial DataFrame from cached records, preserving the metric-name index."""
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    if "index" in df.columns:
+        df = df.set_index("index")
+        df.index.name = None
+    return df
+
+
 def fetch_financials(ticker: str) -> dict[str, pd.DataFrame]:
     """Fetch income statement, balance sheet, cash flow."""
     cache_path = _cache_key("fin", ticker.upper())
     cached = _read_cache(cache_path, max_age_hours=48)
     if cached is not None:
-        return {k: pd.DataFrame(v) for k, v in cached.items()}
+        return {k: _records_to_df(v) for k, v in cached.items()}
 
     try:
         t = yf.Ticker(ticker)
@@ -299,9 +310,22 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
 
     operating_cashflow = latest(["Operating Cash Flow"], cashflow)
     free_cashflow = latest(["Free Cash Flow"], cashflow)
+    dividends_paid = latest(
+        ["Cash Dividends Paid", "Common Stock Dividend Paid", "Payment Of Dividends", "Dividends Paid"],
+        cashflow,
+    )
+    repurchase_of_stock = latest(
+        ["Repurchase Of Capital Stock", "Common Stock Payments", "Repurchase Of Common Stock",
+         "Purchase Of Business", "Repurchase Of Stock"],
+        cashflow,
+    )
 
     gross_profit_prior = prior(["Gross Profit"], income)
     total_assets_for_turnover_prior = total_assets_prior
+    retained_earnings = latest(
+        ["Retained Earnings", "Retained Earnings Total Equity", "Retained Earnings Accumulated Deficit"],
+        balance,
+    )
 
     # Price-based metrics
     momentum_12_1 = _compute_momentum_12_1(hist)
@@ -361,6 +385,9 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "operating_income": operating_income,
         "operating_cashflow": operating_cashflow,
         "free_cashflow": free_cashflow,
+        "dividends_paid": dividends_paid,
+        "repurchase_of_stock": repurchase_of_stock,
+        "retained_earnings": retained_earnings,
         "momentum_12_1": momentum_12_1,
         "volatility_12m": volatility_12m,
         "max_drawdown": drawdown_metrics.get("max_drawdown"),

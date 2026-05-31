@@ -17,22 +17,30 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+_DEFAULT_WEIGHTS: dict[str, float] = {
+    "value": 0.12,
+    "momentum": 0.10,
+    "quality": 0.12,
+    "low_volatility": 0.05,
+    "investment": 0.04,
+    "earnings_revisions": 0.07,
+    "financial_strength": 0.06,
+    "garp": 0.08,
+    "balance_sheet_strength": 0.04,
+    "graham_value": 0.06,
+    "downside_protection": 0.04,
+    "earnings_quality": 0.06,
+    "shareholder_yield": 0.06,
+    "capital_efficiency": 0.06,
+    "distress_risk": 0.04,
+}
+
+
 def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
+    """Return factor weights from config, falling back to defaults for any missing key."""
     cfg = config or load_config()
     weights = cfg.get("factor_weights", {})
-    return {
-        "value": float(weights.get("value", 0.14)),
-        "momentum": float(weights.get("momentum", 0.12)),
-        "quality": float(weights.get("quality", 0.14)),
-        "low_volatility": float(weights.get("low_volatility", 0.08)),
-        "investment": float(weights.get("investment", 0.06)),
-        "earnings_revisions": float(weights.get("earnings_revisions", 0.08)),
-        "financial_strength": float(weights.get("financial_strength", 0.08)),
-        "garp": float(weights.get("garp", 0.10)),
-        "balance_sheet_strength": float(weights.get("balance_sheet_strength", 0.06)),
-        "graham_value": float(weights.get("graham_value", 0.08)),
-        "downside_protection": float(weights.get("downside_protection", 0.06)),
-    }
+    return {family: float(weights.get(family, default)) for family, default in _DEFAULT_WEIGHTS.items()}
 
 
 def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:

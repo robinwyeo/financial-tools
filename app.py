@@ -36,6 +36,10 @@ FACTOR_LABELS = {
     "balance_sheet_strength": "Balance Sheet Strength",
     "graham_value": "Graham Number Value",
     "downside_protection": "Downside Protection (Marks)",
+    "earnings_quality": "Earnings Quality (Accruals)",
+    "shareholder_yield": "Shareholder Yield",
+    "capital_efficiency": "Capital Efficiency (ROIC)",
+    "distress_risk": "Distress Risk (Altman Z)",
 }
 
 METRIC_HELP = {
@@ -138,6 +142,26 @@ FACTOR_HELP = {
     "downside_protection": (
         "How severe past price drops and “bad day” volatility have been (Howard Marks–style). "
         "Higher percentile = historically smaller drawdowns and gentler downside moves."
+    ),
+    "earnings_quality": (
+        "Whether reported profits are backed by actual cash (Sloan accruals anomaly). "
+        "Lower accruals = earnings closer to cash flow = higher quality signal. "
+        "Higher percentile = more cash-backed, less accounting-driven earnings vs peers."
+    ),
+    "shareholder_yield": (
+        "Total cash returned to investors as dividends plus net stock buybacks, divided by market cap "
+        "(Meb Faber’s shareholder yield). A broader measure than dividend yield alone, and harder "
+        "to game. Higher percentile = more capital returned per dollar of market value vs peers."
+    ),
+    "capital_efficiency": (
+        "Return on invested capital (ROIC) — Greenblatt Magic Formula’s second leg. "
+        "Measures how much pre-tax operating profit the business generates per dollar of capital employed. "
+        "Higher percentile = the business compounds capital more efficiently vs peers."
+    ),
+    "distress_risk": (
+        "Altman Z-Score: a classic 5-ratio model (working capital, retained earnings, EBIT, "
+        "market value vs liabilities, and asset turnover) predicting financial distress. "
+        "Higher percentile = lower distress risk vs peers (Z above ~3 is generally considered safe)."
     ),
 }
 

@@ -357,6 +357,154 @@ def compute_downside_protection(raw: dict[str, Any]) -> dict[str, float | None]:
     }
 
 
+def compute_earnings_quality(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Sloan (1996) accruals anomaly: earnings backed by cash flow outperform.
+    accruals = (net_income - operating_cashflow) / total_assets
+    Score = -accruals so higher score means lower accruals (cash-backed earnings).
+    """
+    net_income = raw.get("net_income")
+    operating_cashflow = raw.get("operating_cashflow")
+    total_assets = raw.get("total_assets")
+
+    accruals = None
+    earnings_quality = None
+    if net_income is not None and operating_cashflow is not None and total_assets and total_assets > 0:
+        accruals = (net_income - operating_cashflow) / total_assets
+        earnings_quality = -accruals
+
+    return {
+        "accruals": accruals,
+        "earnings_quality": earnings_quality,
+    }
+
+
+def compute_shareholder_yield(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Faber shareholder yield: total cash returned to shareholders as a fraction of market cap.
+    shareholder_yield = (dividends_paid + net_buybacks) / market_cap
+    Higher = better (more cash returned per dollar of market value).
+    """
+    market_cap = raw.get("market_cap")
+    dividends_paid = raw.get("dividends_paid")
+    repurchase_of_stock = raw.get("repurchase_of_stock")
+
+    shareholder_yield = None
+    net_buybacks = None
+    total_returned = None
+
+    if repurchase_of_stock is not None:
+        # yfinance reports repurchases as negative cash outflow; negate to get positive buyback
+        net_buybacks = -repurchase_of_stock
+
+    if market_cap and market_cap > 0:
+        parts = []
+        if dividends_paid is not None:
+            # Cash dividends are reported as negative outflow; abs gives amount paid
+            parts.append(abs(dividends_paid))
+        if net_buybacks is not None and net_buybacks > 0:
+            parts.append(net_buybacks)
+        if parts:
+            total_returned = sum(parts)
+            shareholder_yield = total_returned / market_cap
+
+    return {
+        "dividends_paid": dividends_paid,
+        "net_buybacks": net_buybacks,
+        "total_returned_to_shareholders": total_returned,
+        "shareholder_yield": shareholder_yield,
+    }
+
+
+def compute_capital_efficiency(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Greenblatt Magic Formula return on invested capital.
+    roic = ebit / invested_capital
+    invested_capital = total_debt + book_equity - total_cash (floored at 1 to avoid distortion)
+    Higher ROIC = better capital allocation.
+    """
+    ebit = raw.get("ebit")
+    total_debt = raw.get("total_debt")
+    book_value = raw.get("book_value")
+    shares = raw.get("shares_outstanding")
+    total_cash = raw.get("total_cash")
+
+    book_equity = book_value * shares if book_value is not None and shares is not None else None
+
+    invested_capital = None
+    roic = None
+
+    if total_debt is not None and book_equity is not None:
+        ic = total_debt + book_equity - (total_cash or 0.0)
+        # Floor at 1% of book equity to avoid division by near-zero or negative IC
+        floor = max(abs(book_equity) * 0.01, 1.0) if book_equity else 1.0
+        invested_capital = max(ic, floor)
+
+    if ebit is not None and invested_capital is not None and invested_capital > 0:
+        roic = ebit / invested_capital
+
+    return {
+        "invested_capital": invested_capital,
+        "roic": roic,
+    }
+
+
+def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Altman Z-Score (1968): multi-ratio distress predictor.
+    Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
+      X1 = working capital / total assets
+      X2 = retained earnings / total assets
+      X3 = EBIT / total assets
+      X4 = market cap / total liabilities
+      X5 = revenue / total assets
+    Higher Z = lower distress risk; score = Z directly.
+    """
+    current_assets = raw.get("current_assets")
+    current_liabilities = raw.get("current_liabilities")
+    retained_earnings = raw.get("retained_earnings")
+    ebit = raw.get("ebit")
+    total_assets = raw.get("total_assets")
+    total_liabilities = raw.get("total_liabilities")
+    market_cap = raw.get("market_cap")
+    revenue = raw.get("revenue")
+
+    if not total_assets or total_assets <= 0:
+        return {"altman_z": None}
+
+    x1 = x2 = x3 = x4 = x5 = None
+
+    if current_assets is not None and current_liabilities is not None:
+        x1 = (current_assets - current_liabilities) / total_assets
+
+    if retained_earnings is not None:
+        x2 = retained_earnings / total_assets
+
+    if ebit is not None:
+        x3 = ebit / total_assets
+
+    if market_cap is not None and total_liabilities and total_liabilities > 0:
+        x4 = market_cap / total_liabilities
+
+    if revenue is not None:
+        x5 = revenue / total_assets
+
+    components = [x1, x2, x3, x4, x5]
+    weights = [1.2, 1.4, 3.3, 0.6, 1.0]
+
+    available = [(w, v) for w, v in zip(weights, components) if v is not None]
+    if not available:
+        return {"altman_z": None}
+
+    # Partial Z if some components are unavailable (scales by available weight fraction)
+    total_weight = sum(w for w, _ in available)
+    full_weight = sum(weights)
+    z_partial = sum(w * v for w, v in available)
+    altman_z = z_partial * (full_weight / total_weight) if total_weight > 0 else None
+
+    return {"altman_z": altman_z}
+
+
 def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     """Compute all raw factor values for a ticker."""
     out: dict[str, float | None] = {}
@@ -371,6 +519,10 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     out.update(compute_balance_sheet_strength(raw))
     out.update(compute_graham_value(raw))
     out.update(compute_downside_protection(raw))
+    out.update(compute_earnings_quality(raw))
+    out.update(compute_shareholder_yield(raw))
+    out.update(compute_capital_efficiency(raw))
+    out.update(compute_altman_z(raw))
     return out
 
 
@@ -387,4 +539,8 @@ FACTOR_SCORE_COLUMNS = {
     "balance_sheet_strength": "balance_sheet_strength",
     "graham_value": "graham_value",
     "downside_protection": "downside_protection",
+    "earnings_quality": "earnings_quality",
+    "shareholder_yield": "shareholder_yield",
+    "capital_efficiency": "roic",
+    "distress_risk": "altman_z",
 }

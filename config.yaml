@@ -13,6 +13,8 @@ watchlist:
   - META
   - BRK.B
   - COST
+  - LLY
+  - NVO
 
 thresholds:
   composite_min: 70
@@ -20,17 +22,21 @@ thresholds:
   exclude_sell_consensus: true
 
 factor_weights:
-  value: 0.14
-  momentum: 0.12
-  quality: 0.14
-  low_volatility: 0.08
-  investment: 0.06
-  earnings_revisions: 0.08
-  financial_strength: 0.08
-  garp: 0.10
-  balance_sheet_strength: 0.06
-  graham_value: 0.08
-  downside_protection: 0.06
+  value: 0.12
+  momentum: 0.10
+  quality: 0.12
+  low_volatility: 0.05
+  investment: 0.04
+  earnings_revisions: 0.07
+  financial_strength: 0.06
+  garp: 0.08
+  balance_sheet_strength: 0.04
+  graham_value: 0.06
+  downside_protection: 0.04
+  earnings_quality: 0.06
+  shareholder_yield: 0.06
+  capital_efficiency: 0.06
+  distress_risk: 0.04
 
 email:
   enabled: false

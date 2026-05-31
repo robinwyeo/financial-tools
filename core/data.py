@@ -404,6 +404,9 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     recommendation_key = info.get("recommendationKey")
     num_analysts = _safe_float(info.get("numberOfAnalystOpinions"))
 
+    fifty_two_week_high = _safe_float(info.get("fiftyTwoWeekHigh"))
+    fifty_two_week_low = _safe_float(info.get("fiftyTwoWeekLow"))
+    exchange = info.get("fullExchangeName") or info.get("exchange")
     sector = info.get("sector") or "Unknown"
     industry = info.get("industry") or "Unknown"
     name = info.get("longName") or info.get("shortName") or ticker.upper()
@@ -462,6 +465,9 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "num_analysts": num_analysts,
         "recommendations": recs,
         "price_history": hist,
+        "fifty_two_week_high": fifty_two_week_high,
+        "fifty_two_week_low": fifty_two_week_low,
+        "exchange": exchange,
         "data_warnings": data_warnings,
     }
 

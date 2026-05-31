@@ -21,22 +21,39 @@ thresholds:
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
 
+# Weights are assigned at the THEME level first, then split across the
+# correlated sub-factors within each theme. This makes the intended factor
+# exposures explicit and prevents a theme from being over-weighted just
+# because it contains more sub-factors. Theme totals are shown in comments.
+# (Weights are renormalized at runtime over whichever factors have data, so
+#  the relative proportions are what matter.)
 factor_weights:
-  value: 0.12
-  momentum: 0.10
-  quality: 0.12
-  low_volatility: 0.05
-  investment: 0.04
-  earnings_revisions: 0.07
+  # Value theme (0.21) — cheapness
+  value: 0.07
+  garp: 0.07
+  graham_value: 0.07
+
+  # Quality theme (0.24) — profitability & financial soundness
+  quality: 0.06
   financial_strength: 0.06
-  garp: 0.08
-  balance_sheet_strength: 0.04
-  graham_value: 0.06
-  downside_protection: 0.04
   earnings_quality: 0.06
-  shareholder_yield: 0.06
   capital_efficiency: 0.06
-  distress_risk: 0.04
+
+  # Trend theme (0.15) — price & estimate momentum
+  momentum: 0.08
+  earnings_revisions: 0.07
+
+  # Risk theme (0.10) — return volatility & drawdowns
+  low_volatility: 0.05
+  downside_protection: 0.05
+
+  # Solvency theme (0.10) — balance-sheet & distress risk
+  balance_sheet_strength: 0.05
+  distress_risk: 0.05
+
+  # Capital-allocation theme (0.20) — cash returns & disciplined investment
+  shareholder_yield: 0.10
+  investment: 0.10
 
 email:
   enabled: true

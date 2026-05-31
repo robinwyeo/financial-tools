@@ -17,22 +17,30 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+# Theme-grouped defaults (kept in sync with config.yaml). Weights are assigned
+# per theme then split across correlated sub-factors; theme totals in comments.
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "value": 0.12,
-    "momentum": 0.10,
-    "quality": 0.12,
-    "low_volatility": 0.05,
-    "investment": 0.04,
-    "earnings_revisions": 0.07,
+    # Value theme (0.21)
+    "value": 0.07,
+    "garp": 0.07,
+    "graham_value": 0.07,
+    # Quality theme (0.24)
+    "quality": 0.06,
     "financial_strength": 0.06,
-    "garp": 0.08,
-    "balance_sheet_strength": 0.04,
-    "graham_value": 0.06,
-    "downside_protection": 0.04,
     "earnings_quality": 0.06,
-    "shareholder_yield": 0.06,
     "capital_efficiency": 0.06,
-    "distress_risk": 0.04,
+    # Trend theme (0.15)
+    "momentum": 0.08,
+    "earnings_revisions": 0.07,
+    # Risk theme (0.10)
+    "low_volatility": 0.05,
+    "downside_protection": 0.05,
+    # Solvency theme (0.10)
+    "balance_sheet_strength": 0.05,
+    "distress_risk": 0.05,
+    # Capital-allocation theme (0.20)
+    "shareholder_yield": 0.10,
+    "investment": 0.10,
 }
 
 

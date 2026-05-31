@@ -75,6 +75,13 @@ METRIC_HELP = {
         "published recommendations. It summarizes professional opinion, not a guarantee of "
         "future performance."
     ),
+    "trailing_pe": (
+        "Price divided by earnings per share over the last 12 months—the classic P/E multiple. "
+        "Lower usually means a cheaper price tag per dollar of past earnings. Shown for context "
+        "only: it is not part of the composite score because it varies by sector, is meaningless "
+        "when earnings are negative, and ignores growth and balance-sheet quality. See Lynch PEG, "
+        "Graham Ratio, and the Value factor for richer valuation context."
+    ),
     "lynch_peg": (
         "Compares price to expected earnings growth and dividends (Peter Lynch’s “PEG” idea). "
         "Higher values here suggest you may be paying less per unit of growth; Lynch often liked "
@@ -316,15 +323,21 @@ def render_stock_view(ticker: str, config: dict) -> None:
         )
 
     factors_raw = analysis.get("factors_raw", {})
-    book_cols = st.columns(2)
-    peg = factors_raw.get("dividend_adjusted_peg") or factors_raw.get("peg_ratio")
+    book_cols = st.columns(3)
+    trailing_pe = factors_raw.get("trailing_pe")
     book_cols[0].metric(
+        "Trailing P/E",
+        f"{trailing_pe:.1f}x" if trailing_pe is not None and trailing_pe > 0 else "N/A",
+        help=METRIC_HELP["trailing_pe"],
+    )
+    peg = factors_raw.get("dividend_adjusted_peg") or factors_raw.get("peg_ratio")
+    book_cols[1].metric(
         "Lynch PEG",
         f"{peg:.2f}" if peg is not None else "N/A",
         help=METRIC_HELP["lynch_peg"],
     )
     graham_ratio = factors_raw.get("graham_ratio")
-    book_cols[1].metric(
+    book_cols[2].metric(
         "Graham Ratio",
         f"{graham_ratio:.2f}" if graham_ratio is not None else "N/A",
         help=METRIC_HELP["graham_ratio"],

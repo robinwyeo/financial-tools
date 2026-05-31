@@ -309,6 +309,27 @@ def render_stock_view(ticker: str, config: dict) -> None:
         help=METRIC_HELP["consensus"],
     )
 
+    factors_raw = analysis.get("factors_raw", {})
+    trailing_pe = factors_raw.get("trailing_pe")
+    peg = factors_raw.get("dividend_adjusted_peg") or factors_raw.get("peg_ratio")
+    graham_ratio = factors_raw.get("graham_ratio")
+
+    c1.metric(
+        "Trailing P/E",
+        f"{trailing_pe:.1f}x" if trailing_pe is not None and trailing_pe > 0 else "N/A",
+        help=METRIC_HELP["trailing_pe"],
+    )
+    c2.metric(
+        "Lynch PEG",
+        f"{peg:.2f}" if peg is not None else "N/A",
+        help=METRIC_HELP["lynch_peg"],
+    )
+    c3.metric(
+        "Graham Ratio",
+        f"{graham_ratio:.2f}" if graham_ratio is not None else "N/A",
+        help=METRIC_HELP["graham_ratio"],
+    )
+
     data_warnings = analysis.get("data_warnings") or []
     if data_warnings:
         with st.expander("Data warnings", expanded=False):
@@ -321,27 +342,6 @@ def render_stock_view(ticker: str, config: dict) -> None:
             f"Meets good-buy criteria (composite ≥ {thresholds['composite_min']}, "
             f"upside ≥ {thresholds['implied_upside_min_pct']}%)"
         )
-
-    factors_raw = analysis.get("factors_raw", {})
-    book_cols = st.columns(3)
-    trailing_pe = factors_raw.get("trailing_pe")
-    book_cols[0].metric(
-        "Trailing P/E",
-        f"{trailing_pe:.1f}x" if trailing_pe is not None and trailing_pe > 0 else "N/A",
-        help=METRIC_HELP["trailing_pe"],
-    )
-    peg = factors_raw.get("dividend_adjusted_peg") or factors_raw.get("peg_ratio")
-    book_cols[1].metric(
-        "Lynch PEG",
-        f"{peg:.2f}" if peg is not None else "N/A",
-        help=METRIC_HELP["lynch_peg"],
-    )
-    graham_ratio = factors_raw.get("graham_ratio")
-    book_cols[2].metric(
-        "Graham Ratio",
-        f"{graham_ratio:.2f}" if graham_ratio is not None else "N/A",
-        help=METRIC_HELP["graham_ratio"],
-    )
 
     render_price_history(ticker)
 

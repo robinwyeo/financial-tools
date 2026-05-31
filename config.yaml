@@ -39,8 +39,8 @@ factor_weights:
   distress_risk: 0.04
 
 email:
-  enabled: false
+  enabled: true
   smtp_host: smtp.gmail.com
   smtp_port: 587
-  from_address: ""
-  to_address: ""
+  from_address: "robinwyeo@gmail.com"
+  to_address: "robinwyeo@gmail.com"

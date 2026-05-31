@@ -391,40 +391,80 @@ def render_company_header(analysis: dict) -> None:
             )
 
 
-def _make_composite_gauge(score: float) -> go.Figure:
-    fig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=score,
-            gauge={
-                "axis": {"range": [0, 100], "visible": False},
-                "bar": {"color": "#14b8a6", "thickness": 0.72},
-                "bgcolor": "#e8ecef",
-                "borderwidth": 0,
-                "steps": [],
-            },
-            number={
-                "font": {"size": 62, "color": "#1e3a5f"},
-                "valueformat": ".0f",
-            },
-            domain={"x": [0, 1], "y": [0.12, 1]},
+def _arc_gauge_html(
+    score: float | None,
+    label: str,
+    label_color: str,
+    percentile_rank: int | None,
+) -> str:
+    """
+    Pure SVG 3/4-circle arc gauge.
+    Starts at the 7:30 clock position, sweeps 270° clockwise to 4:30.
+    Uses width="100%" so it scales from a narrow sidebar column to full mobile width.
+    """
+    cx, cy, r, sw = 80, 80, 60, 12
+    start_deg = 135.0   # 7:30 clock position in SVG angle space
+    span_deg = 270.0
+
+    def pt(deg: float) -> tuple[float, float]:
+        rad = math.radians(deg)
+        return cx + r * math.cos(rad), cy + r * math.sin(rad)
+
+    # Background arc (full 270°)
+    s = pt(start_deg)
+    e = pt(start_deg + span_deg)
+    bg_path = f"M {s[0]:.1f} {s[1]:.1f} A {r} {r} 0 1 1 {e[0]:.1f} {e[1]:.1f}"
+
+    # Teal fill arc proportional to score
+    fill_svg = ""
+    if score is not None and score > 0:
+        fd = score * span_deg / 100.0
+        fe = pt(start_deg + fd)
+        large = 1 if fd > 180 else 0
+        fill_svg = (
+            f'<path d="M {s[0]:.1f} {s[1]:.1f} A {r} {r} 0 {large} 1 {fe[0]:.1f} {fe[1]:.1f}" '
+            f'fill="none" stroke="#14b8a6" stroke-width="{sw}" stroke-linecap="round"/>'
         )
+
+    score_txt = f"{score:.0f}" if score is not None else "N/A"
+    font_sz = 36 if score is not None else 22
+
+    pct_html = ""
+    if percentile_rank is not None:
+        pct_html = (
+            '<div style="background:#f0fdfa;border-radius:8px;padding:0.5rem 0.75rem;'
+            'display:flex;align-items:center;gap:0.6rem;margin-top:0.65rem;text-align:left;">'
+            '<span style="font-size:0.95rem;">📈</span>'
+            '<div>'
+            '<div style="font-size:0.67rem;color:#6b7280;font-weight:500;">Percentile Rank</div>'
+            f'<div style="font-size:1rem;font-weight:700;color:#0d9488;">{ordinal(percentile_rank)}</div>'
+            '<div style="font-size:0.67rem;color:#9ca3af;">vs. Global Universe</div>'
+            '</div>'
+            '</div>'
+        )
+
+    # viewBox clips the empty gap at the bottom (arc endpoints sit at y≈122, cut at y=135)
+    return (
+        '<div style="text-align:center;padding:0.5rem 0.25rem 0.25rem;">'
+        '<svg width="100%" viewBox="5 5 150 130" '
+        'style="max-width:160px;display:block;margin:0 auto;" '
+        'aria-label="Composite score gauge">'
+        f'<path d="{bg_path}" fill="none" stroke="#e8ecef" '
+        f'stroke-width="{sw}" stroke-linecap="round"/>'
+        f'{fill_svg}'
+        f'<text x="{cx}" y="78" text-anchor="middle" dominant-baseline="middle" '
+        f'font-size="{font_sz}" font-weight="800" fill="#1e3a5f" '
+        f'font-family="Inter, Arial, sans-serif">{score_txt}</text>'
+        f'<text x="{cx}" y="100" text-anchor="middle" font-size="13" fill="#9ca3af" '
+        f'font-family="Inter, Arial, sans-serif">/ 100</text>'
+        '</svg>'
+        f'<div style="margin-top:0.2rem;">'
+        f'<div style="font-size:1.05rem;font-weight:700;color:{label_color};">{label}</div>'
+        '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px;">vs. Global Universe</div>'
+        '</div>'
+        f'{pct_html}'
+        '</div>'
     )
-    fig.add_annotation(
-        text="/ 100",
-        x=0.5,
-        y=0.17,
-        font=dict(size=16, color="#9ca3af"),
-        showarrow=False,
-        xanchor="center",
-    )
-    fig.update_layout(
-        height=215,
-        margin=dict(l=20, r=20, t=30, b=5),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-    return fig
 
 
 def render_composite_card(analysis: dict) -> None:
@@ -434,49 +474,14 @@ def render_composite_card(analysis: dict) -> None:
 
     with st.container(border=True):
         st.markdown(
-            '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;text-align:center;'
-            'margin-bottom:-0.25rem;">Composite Score</div>',
+            '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;'
+            'text-align:center;margin-bottom:0.1rem;">Composite Score</div>',
             unsafe_allow_html=True,
         )
-
-        if composite is not None:
-            st.plotly_chart(
-                _make_composite_gauge(composite),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
-        else:
-            st.markdown(
-                '<div style="text-align:center;font-size:3rem;font-weight:700;'
-                'color:#9ca3af;padding:1.5rem 0;">N/A</div>',
-                unsafe_allow_html=True,
-            )
-
         st.markdown(
-            f"""
-            <div style="text-align:center;margin-top:-0.75rem;margin-bottom:0.75rem;">
-                <div style="font-size:1.1rem;font-weight:700;color:{label_color};">{label}</div>
-                <div style="font-size:0.73rem;color:#9ca3af;margin-top:2px;">vs. Global Universe</div>
-            </div>
-            """,
+            _arc_gauge_html(composite, label, label_color, percentile_rank),
             unsafe_allow_html=True,
         )
-
-        if percentile_rank is not None:
-            st.markdown(
-                f"""
-                <div style="background:#f0fdfa;border-radius:8px;padding:0.55rem 0.8rem;
-                    display:flex;align-items:center;gap:0.65rem;">
-                    <span style="font-size:1rem;">📈</span>
-                    <div>
-                        <div style="font-size:0.68rem;color:#6b7280;font-weight:500;">Percentile Rank</div>
-                        <div style="font-size:1.05rem;font-weight:700;color:#0d9488;">{ordinal(percentile_rank)}</div>
-                        <div style="font-size:0.68rem;color:#9ca3af;">vs. Global Universe</div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
 
 
 def render_factor_scorecard_card(analysis: dict) -> None:

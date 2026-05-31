@@ -1,0 +1,390 @@
+"""Empirical factor computations inspired by OpenSourceAP definitions."""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+
+def _ratio(num: float | None, den: float | None) -> float | None:
+    if num is None or den is None or den == 0:
+        return None
+    return num / den
+
+
+def compute_value_factors(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Value: earnings yield, book-to-market, FCF yield."""
+    ev = raw.get("enterprise_value")
+    ebit = raw.get("ebit")
+    market_cap = raw.get("market_cap")
+    book_value = raw.get("book_value")
+    shares = raw.get("shares_outstanding")
+    fcf = raw.get("free_cashflow")
+
+    book_equity = None
+    if book_value is not None and shares is not None:
+        book_equity = book_value * shares
+
+    earnings_yield = _ratio(ebit, ev)
+    book_to_market = _ratio(book_equity, market_cap)
+    fcf_yield = _ratio(fcf, market_cap)
+
+    # Composite value: average of available signals (higher = cheaper)
+    parts = [v for v in [earnings_yield, book_to_market, fcf_yield] if v is not None]
+    value_composite = float(np.mean(parts)) if parts else None
+
+    return {
+        "earnings_yield": earnings_yield,
+        "book_to_market": book_to_market,
+        "fcf_yield": fcf_yield,
+        "value_composite": value_composite,
+    }
+
+
+def compute_momentum_factor(raw: dict[str, Any]) -> dict[str, float | None]:
+    return {"momentum_12_1": raw.get("momentum_12_1")}
+
+
+def compute_quality_factors(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Quality: gross profitability, ROE, ROA, profit margin."""
+    gross_profit = raw.get("gross_profit")
+    total_assets = raw.get("total_assets")
+    net_income = raw.get("net_income")
+    market_cap = raw.get("market_cap")
+    book_value = raw.get("book_value")
+    shares = raw.get("shares_outstanding")
+    revenue = raw.get("revenue")
+
+    book_equity = book_value * shares if book_value and shares else None
+
+    gross_profitability = _ratio(gross_profit, total_assets)
+    roa = _ratio(net_income, total_assets)
+    roe = _ratio(net_income, book_equity)
+    profit_margin = _ratio(net_income, revenue)
+
+    parts = [v for v in [gross_profitability, roe, roa, profit_margin] if v is not None]
+    quality_composite = float(np.mean(parts)) if parts else None
+
+    return {
+        "gross_profitability": gross_profitability,
+        "roe": roe,
+        "roa": roa,
+        "profit_margin": profit_margin,
+        "quality_composite": quality_composite,
+    }
+
+
+def compute_low_volatility_factor(raw: dict[str, Any]) -> dict[str, float | None]:
+    vol = raw.get("volatility_12m")
+    inv_vol = 1.0 / vol if vol and vol > 0 else None
+    return {"volatility_12m": vol, "low_volatility": inv_vol}
+
+
+def compute_investment_factor(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Investment: asset growth YoY (lower growth = better, inverted at scoring)."""
+    ta = raw.get("total_assets")
+    ta_prior = raw.get("total_assets_prior")
+    if ta is None or ta_prior is None or ta_prior == 0:
+        return {"asset_growth": None, "investment": None}
+    growth = (ta / ta_prior) - 1.0
+    # Store negative growth so higher score = lower investment (better)
+    return {"asset_growth": growth, "investment": -growth}
+
+
+def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Proxy for earnings revisions from recommendation trends and target upside.
+    Uses yfinance recommendation history when available.
+    """
+    recs: pd.DataFrame = raw.get("recommendations", pd.DataFrame())
+    score = None
+
+    if recs is not None and not recs.empty:
+        # Recent recommendation sentiment shift
+        df = recs.copy()
+        col_map = {c.lower(): c for c in df.columns}
+        action_col = col_map.get("action") or col_map.get("rating")
+        if action_col:
+            recent = df.tail(20)
+            upgrades = recent[action_col].astype(str).str.lower().str.contains("up|raise|buy", na=False).sum()
+            downgrades = recent[action_col].astype(str).str.lower().str.contains("down|lower|sell", na=False).sum()
+            score = float(upgrades - downgrades)
+
+    # Blend with implied target upside as secondary signal
+    price = raw.get("price")
+    target = raw.get("target_mean")
+    if price and target and price > 0:
+        upside = (target / price) - 1.0
+        if score is None:
+            score = upside * 5  # scale to roughly comparable range
+        else:
+            score = 0.6 * score + 0.4 * (upside * 5)
+
+    return {"earnings_revisions": score}
+
+
+def compute_piotroski_f_score(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Piotroski F-Score (0-9) — financial strength.
+    """
+    score = 0
+    checks = 0
+
+    net_income = raw.get("net_income")
+    net_income_prior = raw.get("net_income_prior")
+    total_assets = raw.get("total_assets")
+    total_assets_prior = raw.get("total_assets_prior")
+    operating_cashflow = raw.get("operating_cashflow")
+    long_term_debt = raw.get("long_term_debt")
+    long_term_debt_prior = raw.get("long_term_debt_prior")
+    current_assets = raw.get("current_assets")
+    current_liabilities = raw.get("current_liabilities")
+    current_assets_prior = raw.get("current_assets_prior")
+    current_liabilities_prior = raw.get("current_liabilities_prior")
+    shares = raw.get("shares_outstanding")
+    shares_prior = raw.get("shares_prior")
+    gross_profit = raw.get("gross_profit")
+    gross_profit_prior = raw.get("gross_profit_prior")
+    revenue = raw.get("revenue")
+    revenue_prior = raw.get("revenue_prior")
+
+    # 1. Positive ROA
+    if net_income is not None and total_assets and total_assets > 0:
+        roa = net_income / total_assets
+        score += int(roa > 0)
+        checks += 1
+
+    # 2. Positive operating cash flow
+    if operating_cashflow is not None:
+        score += int(operating_cashflow > 0)
+        checks += 1
+
+    # 3. ROA increase
+    if net_income is not None and net_income_prior is not None and total_assets and total_assets_prior:
+        roa = net_income / total_assets
+        roa_prior = net_income_prior / total_assets_prior if total_assets_prior else 0
+        score += int(roa > roa_prior)
+        checks += 1
+
+    # 4. Accruals: OCF > Net Income
+    if operating_cashflow is not None and net_income is not None:
+        score += int(operating_cashflow > net_income)
+        checks += 1
+
+    # 5. Lower leverage
+    if long_term_debt is not None and long_term_debt_prior is not None and total_assets and total_assets_prior:
+        lev = long_term_debt / total_assets if total_assets else 0
+        lev_prior = long_term_debt_prior / total_assets_prior if total_assets_prior else 0
+        score += int(lev <= lev_prior)
+        checks += 1
+
+    # 6. Higher current ratio
+    if current_assets and current_liabilities and current_assets_prior and current_liabilities_prior:
+        cr = current_assets / current_liabilities if current_liabilities else 0
+        cr_prior = current_assets_prior / current_liabilities_prior if current_liabilities_prior else 0
+        score += int(cr >= cr_prior)
+        checks += 1
+
+    # 7. No new shares
+    if shares is not None and shares_prior is not None:
+        score += int(shares <= shares_prior)
+        checks += 1
+
+    # 8. Higher gross margin
+    if gross_profit and revenue and gross_profit_prior and revenue_prior and revenue > 0 and revenue_prior > 0:
+        gm = gross_profit / revenue
+        gm_prior = gross_profit_prior / revenue_prior
+        score += int(gm >= gm_prior)
+        checks += 1
+
+    # 9. Higher asset turnover
+    if revenue and total_assets and revenue_prior and total_assets_prior:
+        at = revenue / total_assets
+        at_prior = revenue_prior / total_assets_prior
+        score += int(at >= at_prior)
+        checks += 1
+
+    if checks == 0:
+        return {"piotroski_f_score": None, "financial_strength": None}
+
+    return {"piotroski_f_score": float(score), "financial_strength": float(score)}
+
+
+def _pct_from_decimal(val: float | None) -> float | None:
+    """Convert yfinance decimal rates (0.15) to percentage points (15)."""
+    if val is None:
+        return None
+    # Values > 1 are likely already percentage points (e.g. dividend yield edge cases)
+    if abs(val) > 1:
+        return val
+    return val * 100.0
+
+
+def compute_garp_factor(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Lynch dividend-adjusted PEG: (growth% + yield%) / P/E.
+    Higher = better (more growth/yield per unit of P/E).
+    """
+    trailing_pe = raw.get("trailing_pe")
+    earnings_growth = raw.get("earnings_growth")
+    dividend_yield = raw.get("dividend_yield")
+    trailing_peg = raw.get("trailing_peg_ratio")
+
+    growth_pct = _pct_from_decimal(earnings_growth)
+    yield_pct = _pct_from_decimal(dividend_yield)
+
+    peg_ratio = trailing_peg
+    if trailing_pe and trailing_pe > 0 and growth_pct is not None and growth_pct > 0:
+        peg_ratio = trailing_pe / growth_pct
+
+    dividend_adjusted_peg = None
+    if trailing_pe and trailing_pe > 0:
+        numerator_parts = [p for p in [growth_pct, yield_pct] if p is not None and p > 0]
+        if numerator_parts:
+            dividend_adjusted_peg = sum(numerator_parts) / trailing_pe
+
+    # Primary score: higher dividend-adjusted PEG = better (Lynch: >2 great)
+    garp_score = dividend_adjusted_peg
+    if garp_score is None and peg_ratio is not None and peg_ratio > 0:
+        # Fallback when growth unavailable: invert plain PEG (lower PEG = cheaper growth)
+        garp_score = 1.0 / peg_ratio
+
+    return {
+        "peg_ratio": peg_ratio,
+        "dividend_adjusted_peg": dividend_adjusted_peg,
+        "garp": garp_score,
+    }
+
+
+def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Lynch net-cash position and low leverage.
+    Higher net cash / lower debt-to-equity = stronger balance sheet.
+    """
+    total_cash = raw.get("total_cash")
+    total_debt = raw.get("total_debt")
+    market_cap = raw.get("market_cap")
+    debt_to_equity = raw.get("debt_to_equity")
+
+    net_cash = None
+    if total_cash is not None and total_debt is not None:
+        net_cash = total_cash - total_debt
+
+    net_cash_to_mcap = _ratio(net_cash, market_cap)
+
+    # Invert D/E so lower leverage scores higher; cap extreme values
+    low_leverage = None
+    if debt_to_equity is not None:
+        if debt_to_equity <= 0:
+            low_leverage = 1.0
+        else:
+            low_leverage = 1.0 / (1.0 + debt_to_equity)
+
+    parts = [v for v in [net_cash_to_mcap, low_leverage] if v is not None]
+    balance_sheet_strength = float(np.mean(parts)) if parts else None
+
+    return {
+        "net_cash": net_cash,
+        "net_cash_to_mcap": net_cash_to_mcap,
+        "low_leverage": low_leverage,
+        "balance_sheet_strength": balance_sheet_strength,
+    }
+
+
+def compute_graham_value(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Graham Number margin of safety: sqrt(22.5 * EPS * BVPS) / price.
+    Ratio > 1 means price below Graham fair value.
+    """
+    price = raw.get("price")
+    trailing_eps = raw.get("trailing_eps")
+    book_value = raw.get("book_value")  # BVPS from yfinance
+    current_ratio = raw.get("current_ratio_info")
+    current_assets = raw.get("current_assets")
+    current_liabilities = raw.get("current_liabilities")
+
+    if current_ratio is None and current_assets and current_liabilities and current_liabilities > 0:
+        current_ratio = current_assets / current_liabilities
+
+    graham_fair_value = None
+    graham_ratio = None
+    if (
+        trailing_eps is not None
+        and trailing_eps > 0
+        and book_value is not None
+        and book_value > 0
+    ):
+        graham_fair_value = math.sqrt(22.5 * trailing_eps * book_value)
+        graham_ratio = _ratio(graham_fair_value, price)
+
+    parts = [v for v in [graham_ratio, current_ratio] if v is not None]
+    graham_value = float(np.mean(parts)) if parts else None
+
+    return {
+        "graham_fair_value": graham_fair_value,
+        "graham_ratio": graham_ratio,
+        "current_ratio": current_ratio,
+        "graham_value": graham_value,
+    }
+
+
+def compute_downside_protection(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Marks-style downside risk: max drawdown and downside deviation.
+    Higher score = smaller drawdowns and lower downside volatility.
+    """
+    max_drawdown = raw.get("max_drawdown")
+    downside_deviation = raw.get("downside_deviation")
+
+    # max_drawdown is negative; negate so smaller drawdown = higher score
+    drawdown_score = -max_drawdown if max_drawdown is not None else None
+
+    # Invert downside deviation so lower risk = higher score
+    downside_score = None
+    if downside_deviation is not None:
+        downside_score = 1.0 / (1.0 + downside_deviation)
+
+    parts = [v for v in [drawdown_score, downside_score] if v is not None]
+    downside_protection = float(np.mean(parts)) if parts else None
+
+    return {
+        "max_drawdown": max_drawdown,
+        "downside_deviation": downside_deviation,
+        "downside_protection": downside_protection,
+    }
+
+
+def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Compute all raw factor values for a ticker."""
+    out: dict[str, float | None] = {}
+    out.update(compute_value_factors(raw))
+    out.update(compute_momentum_factor(raw))
+    out.update(compute_quality_factors(raw))
+    out.update(compute_low_volatility_factor(raw))
+    out.update(compute_investment_factor(raw))
+    out.update(compute_earnings_revisions(raw))
+    out.update(compute_piotroski_f_score(raw))
+    out.update(compute_garp_factor(raw))
+    out.update(compute_balance_sheet_strength(raw))
+    out.update(compute_graham_value(raw))
+    out.update(compute_downside_protection(raw))
+    return out
+
+
+# Columns used for cross-sectional scoring (one per factor family)
+FACTOR_SCORE_COLUMNS = {
+    "value": "value_composite",
+    "momentum": "momentum_12_1",
+    "quality": "quality_composite",
+    "low_volatility": "low_volatility",
+    "investment": "investment",
+    "earnings_revisions": "earnings_revisions",
+    "financial_strength": "financial_strength",
+    "garp": "garp",
+    "balance_sheet_strength": "balance_sheet_strength",
+    "graham_value": "graham_value",
+    "downside_protection": "downside_protection",
+}

@@ -1,0 +1,37 @@
+# Stock Metrics Tool configuration
+
+universe:
+  name: sp500
+  sector_scoring: true  # score vs sector peers when sector has enough names
+
+watchlist:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - NVDA
+  - JPM
+
+thresholds:
+  composite_min: 70
+  implied_upside_min_pct: 15
+  exclude_sell_consensus: true
+
+factor_weights:
+  value: 0.14
+  momentum: 0.12
+  quality: 0.14
+  low_volatility: 0.08
+  investment: 0.06
+  earnings_revisions: 0.08
+  financial_strength: 0.08
+  garp: 0.10
+  balance_sheet_strength: 0.06
+  graham_value: 0.08
+  downside_protection: 0.06
+
+email:
+  enabled: false
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  from_address: ""
+  to_address: ""

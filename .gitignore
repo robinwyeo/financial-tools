@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.env
+.venv/
+venv/
+.streamlit/secrets.toml
+data/cache/
+*.parquet.tmp
+.DS_Store
+.pytest_cache/
+.coverage
+htmlcov/

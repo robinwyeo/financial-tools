@@ -17,7 +17,7 @@ watchlist:
   - NVO
 
 thresholds:
-  composite_min: 70
+  composite_min: 60
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
 

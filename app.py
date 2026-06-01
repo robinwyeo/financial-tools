@@ -250,22 +250,15 @@ def fmt_large_number(n: float | None) -> str:
 
 
 def percentile_color(pct: float | None) -> str:
-    """Smooth red → orange → yellow gradient based on percentile rank (0=red, 100=yellow)."""
+    """Red (0–30), yellow (31–70), green (71–100) by percentile rank."""
     if pct is None or (isinstance(pct, float) and math.isnan(pct)):
         return "#d1d5db"
-    p = max(0.0, min(100.0, float(pct))) / 100.0
-    # Anchor colors: red (0), orange (0.5), yellow (1.0)
-    if p <= 0.5:
-        t = p * 2
-        r = int(0xef + t * (0xf9 - 0xef))
-        g = int(0x44 + t * (0x73 - 0x44))
-        b = int(0x44 + t * (0x16 - 0x44))
-    else:
-        t = (p - 0.5) * 2
-        r = int(0xf9 + t * (0xea - 0xf9))
-        g = int(0x73 + t * (0xb3 - 0x73))
-        b = int(0x16 + t * (0x08 - 0x16))
-    return f"#{r:02x}{g:02x}{b:02x}"
+    p = max(0.0, min(100.0, float(pct)))
+    if p <= 30:
+        return "#ef4444"  # red
+    if p <= 70:
+        return "#eab308"  # yellow
+    return "#22c55e"  # green
 
 
 def score_label_and_color(score: float | None) -> tuple[str, str]:
@@ -344,6 +337,13 @@ def render_company_header(analysis: dict) -> None:
     sector = analysis.get("sector") or ""
     industry = analysis.get("industry") or ""
     market_cap = analysis.get("market_cap")
+    price = analysis.get("price")
+    price_html = (
+        f'<span style="font-size:1.55rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
+        f"${price:,.2f}</span>"
+        if price
+        else ""
+    )
 
     left, right = st.columns([3, 2])
     with left:
@@ -355,7 +355,10 @@ def render_company_header(analysis: dict) -> None:
         st.markdown(
             f"""
             <div style="padding:0.15rem 0 0.25rem;">
-                <span style="font-size:2rem;font-weight:800;color:#1e3a5f;line-height:1.1;">{ticker}</span><br>
+                <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;line-height:1.1;">
+                    <span style="font-size:2rem;font-weight:800;color:#1e3a5f;">{ticker}</span>
+                    {price_html}
+                </div>
                 <span style="font-size:0.92rem;color:#6b7280;">{name}</span>{exchange_html}
             </div>
             """,

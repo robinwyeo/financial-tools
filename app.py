@@ -44,7 +44,7 @@ DEFAULT_PRICE_RANGE = "2Y"
 # Chart heights tuned so the stock dashboard fits one viewport (no scroll).
 CHART_HEIGHT_PRICE = 225
 CHART_HEIGHT_RADAR = 235
-CHART_HEIGHT_ANALYST_PIE = 128
+CHART_HEIGHT_ANALYST_PIE = 110
 
 FACTOR_LABELS = {
     "value": "Value",
@@ -353,34 +353,8 @@ def inject_css() -> None:
             background: white !important;
         }
 
-        /* ── Equal-height cards per dashboard row ────────────────────────── */
-        [data-testid="stHorizontalBlock"] {
-            align-items: stretch;
-        }
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-        }
-        /* handle both direct and one-div-wrapper DOM variations */
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div > [data-testid="stVerticalBlock"] {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"],
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div > [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        [data-testid="stVerticalBlockBorderWrapper"] > div {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-        }
-        /* ────────────────────────────────────────────────────────────────── */
+        /* Columns: prevent overflow in narrow slots */
+        [data-testid="stColumn"] { min-width: 0; }
 
         /* Sidebar */
         [data-testid="stSidebar"] { background-color: white; }
@@ -560,10 +534,13 @@ def _factor_group_html(
     accent: str,
     factor_keys: list[str],
     breakdown: dict,
+    first: bool = False,
 ) -> str:
+    top_margin = "0" if first else "8px"
     header = (
-        f'<div style="font-size:0.6rem;font-weight:700;color:{accent};text-transform:uppercase;'
-        f'letter-spacing:0.07em;margin:5px 0 3px;">{group_label}</div>'
+        f'<div style="font-size:0.58rem;font-weight:700;color:{accent};text-transform:uppercase;'
+        f'letter-spacing:0.07em;margin:{top_margin} 0 3px;padding-bottom:2px;'
+        f'border-bottom:1px solid {accent}22;">{group_label}</div>'
     )
     rows = []
     for key in factor_keys:
@@ -580,14 +557,14 @@ def _factor_group_html(
 
         rows.append(
             f'<div style="display:flex;align-items:center;gap:4px;margin:2px 0;min-width:0;">'
-            f'<div style="width:6px;height:6px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-            f'<div style="flex:1 1 0;min-width:0;font-size:0.66rem;color:#374151;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">'
+            f'<div style="width:5px;height:5px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
+            f'<div style="flex:1 1 0;min-width:0;font-size:0.64rem;color:#374151;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;">'
             f"{short_label}</div>"
-            f'<div style="width:38px;flex-shrink:0;background:#f3f4f6;border-radius:3px;height:5px;overflow:hidden;">'
-            f'<div style="width:{bar_w:.0f}%;height:5px;border-radius:3px;background:{color};"></div>'
+            f'<div style="width:34px;flex-shrink:0;background:#f3f4f6;border-radius:3px;height:4px;overflow:hidden;">'
+            f'<div style="width:{bar_w:.0f}%;height:4px;border-radius:3px;background:{color};"></div>'
             f"</div>"
-            f'<div style="width:28px;font-size:0.64rem;font-weight:700;color:{color};'
+            f'<div style="width:26px;font-size:0.62rem;font-weight:700;color:{color};'
             f'text-align:right;flex-shrink:0;">{pct_text}</div>'
             f"</div>"
         )
@@ -599,29 +576,23 @@ def render_factor_scorecard_card(analysis: dict) -> None:
 
     with st.container(border=True):
         st.markdown(
-            """
-            <div style="display:flex;justify-content:space-between;align-items:center;
-                margin-bottom:0.1rem;">
-                <span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>
-                <span style="font-size:0.6rem;font-weight:600;color:#9ca3af;
-                    text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>
-            </div>
-            """,
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'margin-bottom:0.35rem;">'
+            '<span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>'
+            '<span style="font-size:0.58rem;font-weight:600;color:#9ca3af;'
+            'text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>'
+            '</div>',
             unsafe_allow_html=True,
         )
 
-        # Render as a single CSS grid — avoids Streamlit column padding eating label space
-        left_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown)
-            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[:2]
-        )
-        right_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown)
-            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[2:]
-        )
+        # 4-column CSS grid — one column per conceptual group, each only 3-4 rows tall
+        cols_html = ""
+        for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS):
+            cols_html += f"<div>{_factor_group_html(lbl, acc, keys, breakdown, first=True)}</div>"
+
         st.markdown(
-            f'<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px;">'
-            f"<div>{left_html}</div><div>{right_html}</div>"
+            f'<div style="display:grid;grid-template-columns:repeat(4,1fr);column-gap:10px;">'
+            f"{cols_html}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -751,7 +722,7 @@ def _analyst_target_range_html(analyst: dict) -> str:
     if not parts:
         return ""
     return (
-        f'<div style="font-size:0.72rem;color:#6b7280;line-height:1.4;margin-top:0.45rem;">'
+        f'<div style="font-size:0.68rem;color:#6b7280;line-height:1.3;margin-top:0.2rem;">'
         f"{' · '.join(parts)}</div>"
     )
 
@@ -783,22 +754,22 @@ def render_analyst_card(analysis: dict) -> None:
         with hero_col:
             st.markdown(
                 f"""
-                <div style="padding:0.1rem 0 0.2rem;">
-                    <div style="margin-bottom:0.45rem;">
+                <div style="padding:0 0 0.1rem;">
+                    <div style="margin-bottom:0.25rem;">
                         <span style="display:inline-block;background:{bg_color};border-radius:999px;
-                            padding:0.28rem 1rem;">
-                            <span style="font-size:1.35rem;font-weight:800;color:{txt_color};">
+                            padding:0.18rem 0.85rem;">
+                            <span style="font-size:1.2rem;font-weight:800;color:{txt_color};">
                                 {consensus}</span>
                         </span>
                     </div>
-                    <div style="font-size:1.65rem;font-weight:800;color:{upside_color};line-height:1.1;">
-                        {upside_display} <span style="font-size:1.1rem;">{upside_arrow}</span>
+                    <div style="font-size:1.45rem;font-weight:800;color:{upside_color};line-height:1.05;">
+                        {upside_display} <span style="font-size:0.95rem;">{upside_arrow}</span>
                     </div>
-                    <div style="font-size:0.7rem;font-weight:600;color:{upside_color};
-                        text-transform:uppercase;letter-spacing:0.04em;margin-top:0.1rem;">
+                    <div style="font-size:0.64rem;font-weight:600;color:{upside_color};
+                        text-transform:uppercase;letter-spacing:0.04em;margin-top:0.05rem;">
                         Implied upside</div>
                     {target_range_html}
-                    <div style="font-size:0.68rem;color:#374151;margin-top:0.35rem;">
+                    <div style="font-size:0.64rem;color:#374151;margin-top:0.2rem;">
                         Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
                     </div>
                 </div>

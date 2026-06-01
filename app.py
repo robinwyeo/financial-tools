@@ -82,6 +82,25 @@ SHORT_FACTOR_LABELS = {
     "distress_risk": "Distress Risk",
 }
 
+# Very short labels for the 15-spoke radar chart where space is tight.
+RADAR_FACTOR_LABELS: dict[str, str] = {
+    "value":                  "Value",
+    "momentum":               "Momentum",
+    "quality":                "Quality",
+    "low_volatility":         "Low Vol",
+    "investment":             "Investment",
+    "earnings_revisions":     "Est. Rev.",
+    "financial_strength":     "Piotroski",
+    "garp":                   "GARP",
+    "balance_sheet_strength": "Bal. Sheet",
+    "graham_value":           "Graham",
+    "downside_protection":    "Downside",
+    "earnings_quality":       "Accruals",
+    "shareholder_yield":      "Shr. Yield",
+    "capital_efficiency":     "ROIC",
+    "distress_risk":          "Altman Z",
+}
+
 # Conceptual groupings for the Factor Scorecard display.
 # Each entry: (group_label, accent_color, [factor_keys])
 FACTOR_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
@@ -314,9 +333,13 @@ def inject_css() -> None:
         /* Page background */
         [data-testid="stAppViewContainer"] { background-color: #f0f4f8; }
         [data-testid="stHeader"] { background-color: #f0f4f8; }
-        .main .block-container { padding-top: 0.5rem; padding-bottom: 1rem; max-width: 100%; }
-        [data-testid="column"] { min-width: 0; }
-        div[data-testid="stPlotlyChart"] { margin-bottom: -0.35rem; }
+        .main .block-container {
+            padding-top: 0.5rem;
+            padding-bottom: 1rem;
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+            max-width: 100%;
+        }
 
         /* Cards (st.container with border=True) */
         [data-testid="stVerticalBlockBorderWrapper"] {
@@ -329,6 +352,35 @@ def inject_css() -> None:
         [data-testid="stVerticalBlockBorderWrapper"] > div {
             background: white !important;
         }
+
+        /* ── Equal-height cards per dashboard row ────────────────────────── */
+        [data-testid="stHorizontalBlock"] {
+            align-items: stretch;
+        }
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        /* handle both direct and one-div-wrapper DOM variations */
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div > [data-testid="stVerticalBlock"] {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"],
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div > [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"] > div {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+        /* ────────────────────────────────────────────────────────────────── */
 
         /* Sidebar */
         [data-testid="stSidebar"] { background-color: white; }
@@ -451,20 +503,20 @@ def _arc_gauge_html(
     pct_html = ""
     if percentile_rank is not None:
         pct_html = (
-            '<div style="background:#f0fdfa;border-radius:8px;padding:0.5rem 0.75rem;'
-            'display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;text-align:left;">'
-            '<span style="font-size:0.95rem;">📈</span>'
+            '<div style="background:#f0fdfa;border-radius:8px;padding:0.3rem 0.6rem;'
+            'display:flex;align-items:center;gap:0.4rem;margin-top:0.25rem;text-align:left;">'
+            '<span style="font-size:0.85rem;">📈</span>'
             '<div>'
-            '<div style="font-size:0.67rem;color:#6b7280;font-weight:500;">Percentile Rank</div>'
-            f'<div style="font-size:1rem;font-weight:700;color:#0d9488;">{ordinal(percentile_rank)}</div>'
-            '<div style="font-size:0.67rem;color:#9ca3af;">vs. Global Universe</div>'
+            '<div style="font-size:0.62rem;color:#6b7280;font-weight:500;">Percentile Rank</div>'
+            f'<div style="font-size:0.9rem;font-weight:700;color:#0d9488;">{ordinal(percentile_rank)}</div>'
+            '<div style="font-size:0.62rem;color:#9ca3af;">vs. Global Universe</div>'
             '</div>'
             '</div>'
         )
 
     # viewBox clips the empty gap at the bottom (arc endpoints sit at y≈122, cut at y=135)
     return (
-        '<div style="text-align:center;padding:0.5rem 0.25rem 0.25rem;">'
+        '<div style="text-align:center;padding:0.3rem 0.25rem 0.15rem;">'
         '<svg width="100%" viewBox="5 5 150 130" '
         'style="max-width:130px;display:block;margin:0 auto;" '
         'aria-label="Composite score gauge">'
@@ -477,9 +529,9 @@ def _arc_gauge_html(
         f'<text x="{cx}" y="100" text-anchor="middle" font-size="13" fill="#9ca3af" '
         f'font-family="Inter, Arial, sans-serif">/ 100</text>'
         '</svg>'
-        f'<div style="margin-top:0.2rem;">'
-        f'<div style="font-size:1.05rem;font-weight:700;color:{label_color};">{label}</div>'
-        '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px;">vs. Global Universe</div>'
+        f'<div style="margin-top:0.15rem;">'
+        f'<div style="font-size:0.95rem;font-weight:700;color:{label_color};">{label}</div>'
+        '<div style="font-size:0.67rem;color:#9ca3af;margin-top:1px;">vs. Global Universe</div>'
         '</div>'
         f'{pct_html}'
         '</div>'
@@ -527,14 +579,15 @@ def _factor_group_html(
             pct_text = ordinal(int(round(float(pct))))
 
         rows.append(
-            f'<div style="display:flex;align-items:center;gap:5px;margin:2px 0;">'
+            f'<div style="display:flex;align-items:center;gap:4px;margin:2px 0;min-width:0;">'
             f'<div style="width:6px;height:6px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-            f'<div style="width:102px;font-size:0.68rem;color:#374151;flex-shrink:0;line-height:1.15;">'
+            f'<div style="flex:1 1 0;min-width:0;font-size:0.66rem;color:#374151;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">'
             f"{short_label}</div>"
-            f'<div style="flex:1;background:#f3f4f6;border-radius:3px;height:5px;overflow:hidden;">'
+            f'<div style="width:38px;flex-shrink:0;background:#f3f4f6;border-radius:3px;height:5px;overflow:hidden;">'
             f'<div style="width:{bar_w:.0f}%;height:5px;border-radius:3px;background:{color};"></div>'
             f"</div>"
-            f'<div style="width:30px;font-size:0.65rem;font-weight:700;color:{color};'
+            f'<div style="width:28px;font-size:0.64rem;font-weight:700;color:{color};'
             f'text-align:right;flex-shrink:0;">{pct_text}</div>'
             f"</div>"
         )
@@ -557,22 +610,21 @@ def render_factor_scorecard_card(analysis: dict) -> None:
             unsafe_allow_html=True,
         )
 
-        # Two columns: Valuation+Quality on left, Financial Health+Sentiment on right
-        col_a, col_b = st.columns(2, gap="small")
-        left_groups = FACTOR_SCORECARD_GROUPS[:2]   # Valuation, Quality & Profitability
-        right_groups = FACTOR_SCORECARD_GROUPS[2:]  # Financial Health, Market & Sentiment
-
-        with col_a:
-            html = ""
-            for label, accent, keys in left_groups:
-                html += _factor_group_html(label, accent, keys, breakdown)
-            st.markdown(html, unsafe_allow_html=True)
-
-        with col_b:
-            html = ""
-            for label, accent, keys in right_groups:
-                html += _factor_group_html(label, accent, keys, breakdown)
-            st.markdown(html, unsafe_allow_html=True)
+        # Render as a single CSS grid — avoids Streamlit column padding eating label space
+        left_html = "".join(
+            _factor_group_html(lbl, acc, keys, breakdown)
+            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[:2]
+        )
+        right_html = "".join(
+            _factor_group_html(lbl, acc, keys, breakdown)
+            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[2:]
+        )
+        st.markdown(
+            f'<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px;">'
+            f"<div>{left_html}</div><div>{right_html}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_price_history_card(ticker: str) -> None:
@@ -782,7 +834,7 @@ def render_factor_radar_card(analysis: dict, ticker: str) -> None:
             unsafe_allow_html=True,
         )
 
-        families = list(SHORT_FACTOR_LABELS.keys())
+        families = list(RADAR_FACTOR_LABELS.keys())
         raw_vals = [breakdown.get(f, {}).get("percentile") for f in families]
         available = [
             float(v)
@@ -794,7 +846,7 @@ def render_factor_radar_card(analysis: dict, ticker: str) -> None:
             float(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else fill
             for v in raw_vals
         ]
-        theta_labels = [SHORT_FACTOR_LABELS[f] for f in families]
+        theta_labels = [RADAR_FACTOR_LABELS[f] for f in families]
 
         fig = go.Figure(
             go.Scatterpolar(
@@ -808,12 +860,17 @@ def render_factor_radar_card(analysis: dict, ticker: str) -> None:
         )
         fig.update_layout(
             polar=dict(
-                radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=8)),
-                angularaxis=dict(tickfont=dict(size=8)),
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    tickfont=dict(size=7),
+                    tickvals=[25, 50, 75],
+                ),
+                angularaxis=dict(tickfont=dict(size=8.5)),
             ),
             showlegend=False,
             height=CHART_HEIGHT_RADAR,
-            margin=dict(l=30, r=30, t=20, b=20),
+            margin=dict(l=45, r=45, t=30, b=30),
             paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})

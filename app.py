@@ -540,7 +540,8 @@ def _factor_group_html(
     header = (
         f'<div style="font-size:0.58rem;font-weight:700;color:{accent};text-transform:uppercase;'
         f'letter-spacing:0.07em;margin:{top_margin} 0 3px;padding-bottom:2px;'
-        f'border-bottom:1px solid {accent}22;">{group_label}</div>'
+        f'border-bottom:1px solid {accent}22;'
+        f'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{group_label}</div>'
     )
     rows = []
     for key in factor_keys:
@@ -585,15 +586,20 @@ def render_factor_scorecard_card(analysis: dict) -> None:
             unsafe_allow_html=True,
         )
 
-        # 4-column CSS grid — one column per conceptual group, each only 3-4 rows tall
-        cols_html = ""
-        for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS):
-            cols_html += f"<div>{_factor_group_html(lbl, acc, keys, breakdown, first=True)}</div>"
-
+        # 2-column CSS grid: left = Valuation + Quality, right = Financial Health + Market
+        left_html = "".join(
+            _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
+            for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS[:2])
+        )
+        right_html = "".join(
+            _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
+            for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS[2:])
+        )
         st.markdown(
-            f'<div style="display:grid;grid-template-columns:repeat(4,1fr);column-gap:10px;">'
-            f"{cols_html}"
-            f"</div>",
+            '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:14px;overflow:hidden;">'
+            f'<div style="min-width:0;">{left_html}</div>'
+            f'<div style="min-width:0;">{right_html}</div>'
+            "</div>",
             unsafe_allow_html=True,
         )
 
@@ -743,56 +749,45 @@ def render_analyst_card(analysis: dict) -> None:
     downgrades = analyst.get("recent_downgrades", 0)
 
     with st.container(border=True):
+        # Single-column layout so it works at any width (including narrow embedded iframes).
         st.markdown(
-            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.2rem;">'
-            "Analyst Consensus</div>",
+            f"""
+            <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.3rem;">
+                Analyst Consensus</div>
+            <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;margin-bottom:0.25rem;">
+                <span style="display:inline-block;background:{bg_color};border-radius:999px;
+                    padding:0.18rem 0.85rem;">
+                    <span style="font-size:1.15rem;font-weight:800;color:{txt_color};">{consensus}</span>
+                </span>
+                <span style="font-size:1.3rem;font-weight:800;color:{upside_color};line-height:1;">
+                    {upside_display}&thinsp;{upside_arrow}
+                </span>
+                <span style="font-size:0.6rem;font-weight:600;color:{upside_color};
+                    text-transform:uppercase;letter-spacing:0.04em;">implied upside</span>
+            </div>
+            {target_range_html}
+            <div style="font-size:0.64rem;color:#374151;margin-top:0.15rem;">
+                Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-        hero_col, pie_col = st.columns([1.1, 0.9], gap="small")
+        pie_fig = _analyst_recommendations_pie(analyst)
+        if pie_fig is not None:
+            st.plotly_chart(pie_fig, use_container_width=True, config={"displayModeBar": False})
 
-        with hero_col:
+        if num_analysts:
             st.markdown(
-                f"""
-                <div style="padding:0 0 0.1rem;">
-                    <div style="margin-bottom:0.25rem;">
-                        <span style="display:inline-block;background:{bg_color};border-radius:999px;
-                            padding:0.18rem 0.85rem;">
-                            <span style="font-size:1.2rem;font-weight:800;color:{txt_color};">
-                                {consensus}</span>
-                        </span>
-                    </div>
-                    <div style="font-size:1.45rem;font-weight:800;color:{upside_color};line-height:1.05;">
-                        {upside_display} <span style="font-size:0.95rem;">{upside_arrow}</span>
-                    </div>
-                    <div style="font-size:0.64rem;font-weight:600;color:{upside_color};
-                        text-transform:uppercase;letter-spacing:0.04em;margin-top:0.05rem;">
-                        Implied upside</div>
-                    {target_range_html}
-                    <div style="font-size:0.64rem;color:#374151;margin-top:0.2rem;">
-                        Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
-                    </div>
-                </div>
-                """,
+                f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:-0.3rem;">'
+                f"{int(num_analysts)} analysts</div>",
                 unsafe_allow_html=True,
             )
 
-        with pie_col:
-            pie_fig = _analyst_recommendations_pie(analyst)
-            if pie_fig is not None:
-                st.plotly_chart(pie_fig, use_container_width=True, config={"displayModeBar": False})
-            else:
-                st.markdown(
-                    '<div style="font-size:0.72rem;color:#9ca3af;padding:1.5rem 0;text-align:center;">'
-                    "No rating mix</div>",
-                    unsafe_allow_html=True,
-                )
-            if num_analysts:
-                st.markdown(
-                    f'<div style="font-size:0.68rem;color:#9ca3af;text-align:center;margin-top:-0.1rem;">'
-                    f"{int(num_analysts)} analysts</div>",
-                    unsafe_allow_html=True,
-                )
+        actions = analyst.get("recent_actions", [])
+        if actions:
+            with st.expander("Recent analyst actions", expanded=False):
+                st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
 
 
 def render_factor_radar_card(analysis: dict, ticker: str) -> None:
@@ -933,22 +928,24 @@ def render_stock_view(ticker: str, config: dict) -> None:
 
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
-    # Row 1: composite, factor scorecard, analyst consensus (with ratings pie)
-    row1_left, row1_mid, row1_right = st.columns([1.2, 3.6, 2.6], gap="small")
+    # Row 1: Composite Score | Factor Scorecard
+    # Two columns so the cards are naturally similar height and the scorecard
+    # is wide enough to be readable in the embedded blog iframe.
+    row1_left, row1_right = st.columns([1.8, 5.5], gap="small")
     with row1_left:
         render_composite_card(analysis)
-    with row1_mid:
-        render_factor_scorecard_card(analysis)
     with row1_right:
-        render_analyst_card(analysis)
+        render_factor_scorecard_card(analysis)
 
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
-    # Row 2: price history and factor radar (wider now that recommendations are merged)
-    row2_left, row2_right = st.columns([3.35, 2.15], gap="small")
-    with row2_left:
+    # Row 2: Analyst Consensus | Price History | Factor Radar
+    row2_a, row2_b, row2_c = st.columns([2.2, 3.5, 1.8], gap="small")
+    with row2_a:
+        render_analyst_card(analysis)
+    with row2_b:
         render_price_history_card(ticker)
-    with row2_right:
+    with row2_c:
         render_factor_radar_card(analysis, ticker)
 
     with st.expander("Raw factor values"):

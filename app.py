@@ -41,6 +41,11 @@ PRICE_HISTORY_RANGES: dict[str, str] = {
 }
 DEFAULT_PRICE_RANGE = "2Y"
 
+# Chart heights tuned so the stock dashboard fits one viewport (no scroll).
+CHART_HEIGHT_PRICE = 195
+CHART_HEIGHT_RADAR = 210
+CHART_HEIGHT_ANALYST_PIE = 165
+
 FACTOR_LABELS = {
     "value": "Value",
     "momentum": "Momentum (12-1)",
@@ -300,7 +305,9 @@ def inject_css() -> None:
         /* Page background */
         [data-testid="stAppViewContainer"] { background-color: #f0f4f8; }
         [data-testid="stHeader"] { background-color: #f0f4f8; }
-        .main .block-container { padding-top: 0.75rem; padding-bottom: 2rem; }
+        .main .block-container { padding-top: 0.5rem; padding-bottom: 1rem; max-width: 100%; }
+        [data-testid="column"] { min-width: 0; }
+        div[data-testid="stPlotlyChart"] { margin-bottom: -0.35rem; }
 
         /* Cards (st.container with border=True) */
         [data-testid="stVerticalBlockBorderWrapper"] {
@@ -339,7 +346,7 @@ def render_company_header(analysis: dict) -> None:
     market_cap = analysis.get("market_cap")
     price = analysis.get("price")
     price_html = (
-        f'<span style="font-size:1.55rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
+        f'<span style="font-size:1.25rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
         f"${price:,.2f}</span>"
         if price
         else ""
@@ -354,12 +361,12 @@ def render_company_header(analysis: dict) -> None:
         )
         st.markdown(
             f"""
-            <div style="padding:0.15rem 0 0.25rem;">
-                <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;line-height:1.1;">
-                    <span style="font-size:2rem;font-weight:800;color:#1e3a5f;">{ticker}</span>
+            <div style="padding:0.05rem 0 0.1rem;">
+                <div style="display:flex;align-items:baseline;gap:0.6rem;flex-wrap:wrap;line-height:1.05;">
+                    <span style="font-size:1.55rem;font-weight:800;color:#1e3a5f;">{ticker}</span>
                     {price_html}
                 </div>
-                <span style="font-size:0.92rem;color:#6b7280;">{name}</span>{exchange_html}
+                <span style="font-size:0.82rem;color:#6b7280;">{name}</span>{exchange_html}
             </div>
             """,
             unsafe_allow_html=True,
@@ -436,7 +443,7 @@ def _arc_gauge_html(
     if percentile_rank is not None:
         pct_html = (
             '<div style="background:#f0fdfa;border-radius:8px;padding:0.5rem 0.75rem;'
-            'display:flex;align-items:center;gap:0.6rem;margin-top:0.65rem;text-align:left;">'
+            'display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;text-align:left;">'
             '<span style="font-size:0.95rem;">📈</span>'
             '<div>'
             '<div style="font-size:0.67rem;color:#6b7280;font-weight:500;">Percentile Rank</div>'
@@ -450,7 +457,7 @@ def _arc_gauge_html(
     return (
         '<div style="text-align:center;padding:0.5rem 0.25rem 0.25rem;">'
         '<svg width="100%" viewBox="5 5 150 130" '
-        'style="max-width:160px;display:block;margin:0 auto;" '
+        'style="max-width:130px;display:block;margin:0 auto;" '
         'aria-label="Composite score gauge">'
         f'<path d="{bg_path}" fill="none" stroke="#e8ecef" '
         f'stroke-width="{sw}" stroke-linecap="round"/>'
@@ -487,48 +494,61 @@ def render_composite_card(analysis: dict) -> None:
         )
 
 
+def _factor_scorecard_rows_html(
+    breakdown: dict,
+    families: list[tuple[str, str]],
+) -> str:
+    rows = []
+    for family, short_label in families:
+        fb = breakdown.get(family, {})
+        pct = fb.get("percentile")
+        color = percentile_color(pct)
+
+        if pct is None or (isinstance(pct, float) and math.isnan(pct)):
+            bar_w = 0
+            pct_text = "N/A"
+        else:
+            bar_w = min(max(float(pct), 0), 100)
+            pct_text = ordinal(int(round(float(pct))))
+
+        rows.append(
+            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
+            f'<div style="width:7px;height:7px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
+            f'<div style="width:108px;font-size:0.7rem;color:#374151;flex-shrink:0;line-height:1.15;">'
+            f"{short_label}</div>"
+            f'<div style="flex:1;background:#f3f4f6;border-radius:3px;height:6px;overflow:hidden;">'
+            f'<div style="width:{bar_w:.0f}%;height:6px;border-radius:3px;background:{color};"></div>'
+            f"</div>"
+            f'<div style="width:32px;font-size:0.68rem;font-weight:600;color:{color};'
+            f'text-align:right;flex-shrink:0;">{pct_text}</div>'
+            f"</div>"
+        )
+    return "\n".join(rows)
+
+
 def render_factor_scorecard_card(analysis: dict) -> None:
     breakdown = analysis.get("factor_breakdown", {})
+    families = list(SHORT_FACTOR_LABELS.items())
+    mid = (len(families) + 1) // 2
 
     with st.container(border=True):
         st.markdown(
             """
             <div style="display:flex;justify-content:space-between;align-items:center;
-                margin-bottom:0.5rem;">
-                <span style="font-size:0.92rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>
-                <span style="font-size:0.68rem;font-weight:600;color:#9ca3af;
+                margin-bottom:0.25rem;">
+                <span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>
+                <span style="font-size:0.64rem;font-weight:600;color:#9ca3af;
                     text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        rows = []
-        for family, short_label in SHORT_FACTOR_LABELS.items():
-            fb = breakdown.get(family, {})
-            pct = fb.get("percentile")
-            color = percentile_color(pct)
-
-            if pct is None or (isinstance(pct, float) and math.isnan(pct)):
-                bar_w = 0
-                pct_text = "N/A"
-            else:
-                bar_w = min(max(float(pct), 0), 100)
-                pct_text = ordinal(int(round(float(pct))))
-
-            rows.append(
-                f'<div style="display:flex;align-items:center;gap:9px;margin:4px 0;">'
-                f'<div style="width:9px;height:9px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-                f'<div style="width:130px;font-size:0.78rem;color:#374151;flex-shrink:0;">{short_label}</div>'
-                f'<div style="flex:1;background:#f3f4f6;border-radius:4px;height:8px;overflow:hidden;">'
-                f'<div style="width:{bar_w:.0f}%;height:8px;border-radius:4px;background:{color};"></div>'
-                f'</div>'
-                f'<div style="width:36px;font-size:0.78rem;font-weight:600;color:{color};'
-                f'text-align:right;flex-shrink:0;">{pct_text}</div>'
-                f'</div>'
-            )
-
-        st.markdown("\n".join(rows), unsafe_allow_html=True)
+        col_a, col_b = st.columns(2, gap="small")
+        with col_a:
+            st.markdown(_factor_scorecard_rows_html(breakdown, families[:mid]), unsafe_allow_html=True)
+        with col_b:
+            st.markdown(_factor_scorecard_rows_html(breakdown, families[mid:]), unsafe_allow_html=True)
 
 
 def render_price_history_card(ticker: str) -> None:
@@ -584,8 +604,8 @@ def render_price_history_card(ticker: str) -> None:
         )
 
         fig.update_layout(
-            height=290,
-            margin=dict(l=10, r=10, t=20, b=10),
+            height=CHART_HEIGHT_PRICE,
+            margin=dict(l=10, r=10, t=16, b=8),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             legend=dict(
@@ -635,7 +655,7 @@ def render_analyst_card(analysis: dict) -> None:
 
     with st.container(border=True):
         st.markdown(
-            '<div style="font-size:0.92rem;font-weight:700;color:#1e3a5f;margin-bottom:0.65rem;">'
+            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.35rem;">'
             "Analyst Consensus</div>",
             unsafe_allow_html=True,
         )
@@ -643,10 +663,10 @@ def render_analyst_card(analysis: dict) -> None:
         # Consensus pill
         st.markdown(
             f"""
-            <div style="text-align:center;margin-bottom:0.9rem;">
+            <div style="text-align:center;margin-bottom:0.45rem;">
                 <div style="display:inline-block;background:{bg_color};border-radius:999px;
-                    padding:0.35rem 1.8rem;">
-                    <span style="font-size:2rem;font-weight:700;color:{txt_color};">{consensus}</span>
+                    padding:0.25rem 1.25rem;">
+                    <span style="font-size:1.45rem;font-weight:700;color:{txt_color};">{consensus}</span>
                 </div>
             </div>
             """,
@@ -658,10 +678,10 @@ def render_analyst_card(analysis: dict) -> None:
             price_str = f"vs. Current Price ${price:,.2f}" if price else ""
             st.markdown(
                 f"""
-                <div style="text-align:center;margin-bottom:0.4rem;">
-                    <div style="font-size:0.72rem;color:#9ca3af;font-weight:500;">Average Price Target</div>
-                    <div style="font-size:1.85rem;font-weight:700;color:#1e3a5f;">${target_mean:,.2f}</div>
-                    <div style="font-size:0.76rem;color:#6b7280;">{price_str}</div>
+                <div style="text-align:center;margin-bottom:0.25rem;">
+                    <div style="font-size:0.68rem;color:#9ca3af;font-weight:500;">Average Price Target</div>
+                    <div style="font-size:1.35rem;font-weight:700;color:#1e3a5f;">${target_mean:,.2f}</div>
+                    <div style="font-size:0.72rem;color:#6b7280;">{price_str}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -674,12 +694,12 @@ def render_analyst_card(analysis: dict) -> None:
             analysts_note = f"Based on {int(num_analysts)} analysts" if num_analysts else ""
             st.markdown(
                 f"""
-                <div style="text-align:center;margin-bottom:0.9rem;">
-                    <span style="font-size:1.55rem;font-weight:700;color:{upside_color};">
+                <div style="text-align:center;margin-bottom:0.45rem;">
+                    <span style="font-size:1.2rem;font-weight:700;color:{upside_color};">
                         {implied_upside:+.0f}%&nbsp;{arrow}
                     </span><br>
-                    <span style="font-size:0.8rem;font-weight:600;color:{upside_color};">Implied Upside</span><br>
-                    <span style="font-size:0.7rem;color:#9ca3af;">{analysts_note}</span>
+                    <span style="font-size:0.74rem;font-weight:600;color:{upside_color};">Implied Upside</span><br>
+                    <span style="font-size:0.66rem;color:#9ca3af;">{analysts_note}</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -702,17 +722,129 @@ def render_analyst_card(analysis: dict) -> None:
             stats.append(("💰", "Dividend Yield", f"{dividend_yield * 100:.2f}%"))
 
         if stats:
-            stat_rows = []
-            for icon, stat_label, stat_val in stats:
-                stat_rows.append(
-                    f'<div style="display:flex;align-items:center;gap:0.55rem;padding:0.3rem 0;'
-                    f'border-bottom:1px solid #f9fafb;">'
-                    f'<span style="font-size:0.88rem;">{icon}</span>'
-                    f'<span style="font-size:0.78rem;color:#6b7280;flex:1;">{stat_label}</span>'
-                    f'<span style="font-size:0.8rem;font-weight:600;color:#374151;">{stat_val}</span>'
-                    f'</div>'
+            stat_cells = []
+            for icon, stat_label, stat_val in stats[:4]:
+                stat_cells.append(
+                    f'<div style="padding:0.2rem 0.35rem;">'
+                    f'<div style="font-size:0.62rem;color:#9ca3af;">{icon} {stat_label}</div>'
+                    f'<div style="font-size:0.74rem;font-weight:600;color:#374151;line-height:1.2;">'
+                    f"{stat_val}</div></div>"
                 )
-            st.markdown("\n".join(stat_rows), unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.1rem 0.5rem;">'
+                f'{"".join(stat_cells)}</div>',
+                unsafe_allow_html=True,
+            )
+
+
+def render_analyst_recommendations_card(analysis: dict) -> None:
+    analyst = analysis.get("analyst", {})
+
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.2rem;">'
+            "Analyst Recommendations</div>",
+            unsafe_allow_html=True,
+        )
+
+        total = (
+            analyst.get("buy_count", 0)
+            + analyst.get("hold_count", 0)
+            + analyst.get("sell_count", 0)
+        )
+        if total > 0:
+            fig = px.pie(
+                values=[
+                    analyst.get("buy_count", 0),
+                    analyst.get("hold_count", 0),
+                    analyst.get("sell_count", 0),
+                ],
+                names=["Buy", "Hold", "Sell"],
+                color_discrete_sequence=["#10b981", "#f59e0b", "#ef4444"],
+            )
+            fig.update_layout(
+                height=CHART_HEIGHT_ANALYST_PIE,
+                margin=dict(l=0, r=0, t=8, b=0),
+                showlegend=True,
+                legend=dict(orientation="h", y=-0.08, font=dict(size=9)),
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.write(f"Consensus: **{analyst.get('consensus_label', 'Unknown')}**")
+
+        targets = []
+        if analyst.get("target_low") is not None:
+            targets.append(f"Low ${analyst['target_low']:,.0f}")
+        if analyst.get("target_mean") is not None:
+            targets.append(f"Mean ${analyst['target_mean']:,.0f}")
+        if analyst.get("target_high") is not None:
+            targets.append(f"High ${analyst['target_high']:,.0f}")
+        if targets:
+            st.markdown(
+                f'<div style="font-size:0.7rem;color:#6b7280;text-align:center;margin-top:-0.15rem;">'
+                f"{' · '.join(targets)}</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f'<div style="font-size:0.72rem;color:#374151;text-align:center;margin-top:0.15rem;">'
+            f"Upgrades / Downgrades: "
+            f"<b>{analyst.get('recent_upgrades', 0)}</b> / <b>{analyst.get('recent_downgrades', 0)}</b>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        actions = analyst.get("recent_actions", [])
+        if actions:
+            with st.expander("Recent actions", expanded=False):
+                st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
+
+
+def render_factor_radar_card(analysis: dict, ticker: str) -> None:
+    breakdown = analysis.get("factor_breakdown", {})
+
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.15rem;">'
+            "Factor Radar</div>",
+            unsafe_allow_html=True,
+        )
+
+        families = list(SHORT_FACTOR_LABELS.keys())
+        raw_vals = [breakdown.get(f, {}).get("percentile") for f in families]
+        available = [
+            float(v)
+            for v in raw_vals
+            if v is not None and not (isinstance(v, float) and math.isnan(v))
+        ]
+        fill = sum(available) / len(available) if available else 50.0
+        values = [
+            float(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else fill
+            for v in raw_vals
+        ]
+        theta_labels = [SHORT_FACTOR_LABELS[f] for f in families]
+
+        fig = go.Figure(
+            go.Scatterpolar(
+                r=values + [values[0]],
+                theta=theta_labels + [theta_labels[0]],
+                fill="toself",
+                fillcolor="rgba(20, 184, 166, 0.2)",
+                line=dict(color="#14b8a6", width=2),
+                name=ticker,
+            )
+        )
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=8)),
+                angularaxis=dict(tickfont=dict(size=8)),
+            ),
+            showlegend=False,
+            height=CHART_HEIGHT_RADAR,
+            margin=dict(l=30, r=30, t=20, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -799,111 +931,27 @@ def render_stock_view(ticker: str, config: dict) -> None:
     with st.container(border=True):
         render_company_header(analysis)
 
-    st.markdown("<div style='margin-top:0.6rem;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
-    # Three-column main layout
-    col_left, col_mid, col_right = st.columns([2.2, 4.5, 2.8], gap="medium")
-
-    with col_left:
+    # Row 1: scores and consensus
+    row1_left, row1_mid, row1_right = st.columns([1.35, 3.4, 2.1], gap="small")
+    with row1_left:
         render_composite_card(analysis)
-
-    with col_mid:
+    with row1_mid:
         render_factor_scorecard_card(analysis)
-        st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
-        render_price_history_card(ticker)
-
-    with col_right:
+    with row1_right:
         render_analyst_card(analysis)
 
-    # ── Collapsible detail sections ──────────────────────────────────────────
-    st.markdown("<div style='margin-top:0.75rem;'></div>", unsafe_allow_html=True)
-    analyst = analysis.get("analyst", {})
-    col_a, col_b = st.columns(2)
+    st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
-    with col_a:
-        with st.expander("Analyst Recommendations", expanded=True):
-            total = (
-                analyst.get("buy_count", 0)
-                + analyst.get("hold_count", 0)
-                + analyst.get("sell_count", 0)
-            )
-            if total > 0:
-                fig = px.pie(
-                    values=[
-                        analyst.get("buy_count", 0),
-                        analyst.get("hold_count", 0),
-                        analyst.get("sell_count", 0),
-                    ],
-                    names=["Buy", "Hold", "Sell"],
-                    color_discrete_sequence=["#10b981", "#f59e0b", "#ef4444"],
-                )
-                fig.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            else:
-                st.write(f"Consensus: **{analyst.get('consensus_label', 'Unknown')}**")
-
-            t1, t2, t3 = st.columns(3)
-            t1.metric(
-                "Target Low",
-                f"${analyst.get('target_low', 0):,.2f}" if analyst.get("target_low") else "N/A",
-                help=METRIC_HELP["target_low"],
-            )
-            t2.metric(
-                "Target Mean",
-                f"${analyst.get('target_mean', 0):,.2f}" if analyst.get("target_mean") else "N/A",
-                help=METRIC_HELP["target_mean"],
-            )
-            t3.metric(
-                "Target High",
-                f"${analyst.get('target_high', 0):,.2f}" if analyst.get("target_high") else "N/A",
-                help=METRIC_HELP["target_high"],
-            )
-
-            st.metric(
-                "Recent Upgrades / Downgrades",
-                f"{analyst.get('recent_upgrades', 0)} / {analyst.get('recent_downgrades', 0)}",
-                help=METRIC_HELP["upgrades_downgrades"],
-            )
-
-            actions = analyst.get("recent_actions", [])
-            if actions:
-                st.markdown("**Recent Actions**")
-                st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
-
-    with col_b:
-        with st.expander("Factor Radar", expanded=True):
-            breakdown = analysis.get("factor_breakdown", {})
-            families = list(FACTOR_LABELS.keys())
-            raw_vals = [breakdown.get(f, {}).get("percentile") for f in families]
-            available = [
-                float(v)
-                for v in raw_vals
-                if v is not None and not (isinstance(v, float) and math.isnan(v))
-            ]
-            fill = sum(available) / len(available) if available else 50.0
-            values = [
-                float(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else fill
-                for v in raw_vals
-            ]
-
-            fig = go.Figure(
-                go.Scatterpolar(
-                    r=values + [values[0]],
-                    theta=[FACTOR_LABELS[f] for f in families] + [FACTOR_LABELS[families[0]]],
-                    fill="toself",
-                    fillcolor="rgba(20, 184, 166, 0.2)",
-                    line=dict(color="#14b8a6", width=2),
-                    name=ticker,
-                )
-            )
-            fig.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=False,
-                height=360,
-                margin=dict(l=50, r=50, t=50, b=50),
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    # Row 2: price history, analyst breakdown, factor radar
+    row2_left, row2_mid, row2_right = st.columns([2.6, 1.5, 1.5], gap="small")
+    with row2_left:
+        render_price_history_card(ticker)
+    with row2_mid:
+        render_analyst_recommendations_card(analysis)
+    with row2_right:
+        render_factor_radar_card(analysis, ticker)
 
     with st.expander("Raw factor values"):
         st.json(analysis.get("factors_raw", {}))

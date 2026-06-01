@@ -664,29 +664,19 @@ def _analyst_recommendations_pie(analyst: dict) -> go.Figure | None:
     return fig
 
 
-def _analyst_rating_pills_html(analyst: dict) -> str:
-    buckets = [
-        ("Buy", analyst.get("buy_count", 0), "#059669", "#ecfdf5"),
-        ("Hold", analyst.get("hold_count", 0), "#b45309", "#fffbeb"),
-        ("Sell", analyst.get("sell_count", 0), "#dc2626", "#fef2f2"),
-    ]
-    total = sum(count for _, count, _, _ in buckets)
-    if total <= 0:
+def _analyst_target_range_html(analyst: dict) -> str:
+    parts: list[str] = []
+    if analyst.get("target_low") is not None:
+        parts.append(f"Low <b>${analyst['target_low']:,.0f}</b>")
+    if analyst.get("target_mean") is not None:
+        parts.append(f"Mean <b>${analyst['target_mean']:,.0f}</b>")
+    if analyst.get("target_high") is not None:
+        parts.append(f"High <b>${analyst['target_high']:,.0f}</b>")
+    if not parts:
         return ""
-
-    pills = []
-    for label, count, color, bg in buckets:
-        if count <= 0:
-            continue
-        pct = round(100 * count / total)
-        pills.append(
-            f'<span style="display:inline-block;background:{bg};color:{color};'
-            f'font-size:0.68rem;font-weight:600;padding:0.15rem 0.45rem;border-radius:6px;">'
-            f"{label} {pct}%</span>"
-        )
     return (
-        f'<div style="display:flex;flex-wrap:wrap;gap:0.35rem;justify-content:center;'
-        f'margin-top:0.3rem;">{"".join(pills)}</div>'
+        f'<div style="font-size:0.72rem;color:#6b7280;line-height:1.4;margin-top:0.45rem;">'
+        f"{' · '.join(parts)}</div>"
     )
 
 
@@ -694,7 +684,6 @@ def render_analyst_card(analysis: dict) -> None:
     analyst = analysis.get("analyst", {})
 
     consensus = analyst.get("consensus_label", "N/A")
-    target_mean = analyst.get("target_mean")
     implied_upside = analyst.get("implied_upside_pct")
     num_analysts = analyst.get("num_analysts")
 
@@ -702,8 +691,8 @@ def render_analyst_card(analysis: dict) -> None:
     upside_color = "#10b981" if (implied_upside or 0) >= 0 else "#ef4444"
     upside_arrow = "↗" if (implied_upside or 0) >= 0 else "↘"
     upside_display = f"{implied_upside:+.0f}%" if implied_upside is not None else "—"
-    target_display = f"${target_mean:,.0f}" if target_mean is not None else "—"
     analysts_display = f"{int(num_analysts)} analysts" if num_analysts else ""
+    target_range_html = _analyst_target_range_html(analyst)
 
     with st.container(border=True):
         st.markdown(
@@ -731,12 +720,8 @@ def render_analyst_card(analysis: dict) -> None:
                     <div style="font-size:0.7rem;font-weight:600;color:{upside_color};
                         text-transform:uppercase;letter-spacing:0.04em;margin-top:0.1rem;">
                         Implied upside</div>
-                    <div style="font-size:1rem;font-weight:700;color:#1e3a5f;margin-top:0.55rem;">
-                        {target_display}
-                        <span style="font-size:0.72rem;font-weight:500;color:#9ca3af;">
-                            &nbsp;avg target</span>
-                    </div>
-                    {f'<div style="font-size:0.68rem;color:#9ca3af;margin-top:0.2rem;">{analysts_display}</div>' if analysts_display else ''}
+                    {target_range_html}
+                    {f'<div style="font-size:0.68rem;color:#9ca3af;margin-top:0.25rem;">{analysts_display}</div>' if analysts_display else ''}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -753,15 +738,7 @@ def render_analyst_card(analysis: dict) -> None:
                     unsafe_allow_html=True,
                 )
 
-        pills_html = _analyst_rating_pills_html(analyst)
-        if pills_html:
-            st.markdown(pills_html, unsafe_allow_html=True)
-
         detail_lines: list[str] = []
-        target_low = analyst.get("target_low")
-        target_high = analyst.get("target_high")
-        if target_low is not None and target_high is not None:
-            detail_lines.append(f"12-mo range ${target_low:,.0f} – ${target_high:,.0f}")
         upgrades = analyst.get("recent_upgrades", 0)
         downgrades = analyst.get("recent_downgrades", 0)
         if upgrades or downgrades:

@@ -82,6 +82,15 @@ SHORT_FACTOR_LABELS = {
     "distress_risk": "Distress Risk",
 }
 
+# Conceptual groupings for the Factor Scorecard display.
+# Each entry: (group_label, accent_color, [factor_keys])
+FACTOR_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("Valuation", "#14b8a6", ["value", "garp", "graham_value", "shareholder_yield"]),
+    ("Quality & Profitability", "#8b5cf6", ["quality", "capital_efficiency", "earnings_quality"]),
+    ("Financial Health", "#3b82f6", ["financial_strength", "balance_sheet_strength", "distress_risk", "investment"]),
+    ("Market & Sentiment", "#f59e0b", ["momentum", "earnings_revisions", "low_volatility", "downside_protection"]),
+]
+
 FACTOR_COLORS = {
     "value":                  "#14b8a6",
     "momentum":               "#3b82f6",
@@ -494,61 +503,76 @@ def render_composite_card(analysis: dict) -> None:
         )
 
 
-def _factor_scorecard_rows_html(
+def _factor_group_html(
+    group_label: str,
+    accent: str,
+    factor_keys: list[str],
     breakdown: dict,
-    families: list[tuple[str, str]],
 ) -> str:
+    header = (
+        f'<div style="font-size:0.6rem;font-weight:700;color:{accent};text-transform:uppercase;'
+        f'letter-spacing:0.07em;margin:5px 0 3px;">{group_label}</div>'
+    )
     rows = []
-    for family, short_label in families:
-        fb = breakdown.get(family, {})
+    for key in factor_keys:
+        short_label = SHORT_FACTOR_LABELS.get(key, key)
+        fb = breakdown.get(key, {})
         pct = fb.get("percentile")
         color = percentile_color(pct)
 
         if pct is None or (isinstance(pct, float) and math.isnan(pct)):
-            bar_w = 0
-            pct_text = "N/A"
+            bar_w, pct_text = 0, "N/A"
         else:
             bar_w = min(max(float(pct), 0), 100)
             pct_text = ordinal(int(round(float(pct))))
 
         rows.append(
-            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
-            f'<div style="width:7px;height:7px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-            f'<div style="width:108px;font-size:0.7rem;color:#374151;flex-shrink:0;line-height:1.15;">'
+            f'<div style="display:flex;align-items:center;gap:5px;margin:2px 0;">'
+            f'<div style="width:6px;height:6px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
+            f'<div style="width:102px;font-size:0.68rem;color:#374151;flex-shrink:0;line-height:1.15;">'
             f"{short_label}</div>"
-            f'<div style="flex:1;background:#f3f4f6;border-radius:3px;height:6px;overflow:hidden;">'
-            f'<div style="width:{bar_w:.0f}%;height:6px;border-radius:3px;background:{color};"></div>'
+            f'<div style="flex:1;background:#f3f4f6;border-radius:3px;height:5px;overflow:hidden;">'
+            f'<div style="width:{bar_w:.0f}%;height:5px;border-radius:3px;background:{color};"></div>'
             f"</div>"
-            f'<div style="width:32px;font-size:0.68rem;font-weight:600;color:{color};'
+            f'<div style="width:30px;font-size:0.65rem;font-weight:700;color:{color};'
             f'text-align:right;flex-shrink:0;">{pct_text}</div>'
             f"</div>"
         )
-    return "\n".join(rows)
+    return header + "\n".join(rows)
 
 
 def render_factor_scorecard_card(analysis: dict) -> None:
     breakdown = analysis.get("factor_breakdown", {})
-    families = list(SHORT_FACTOR_LABELS.items())
-    mid = (len(families) + 1) // 2
 
     with st.container(border=True):
         st.markdown(
             """
             <div style="display:flex;justify-content:space-between;align-items:center;
-                margin-bottom:0.25rem;">
+                margin-bottom:0.1rem;">
                 <span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>
-                <span style="font-size:0.64rem;font-weight:600;color:#9ca3af;
+                <span style="font-size:0.6rem;font-weight:600;color:#9ca3af;
                     text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+        # Two columns: Valuation+Quality on left, Financial Health+Sentiment on right
         col_a, col_b = st.columns(2, gap="small")
+        left_groups = FACTOR_SCORECARD_GROUPS[:2]   # Valuation, Quality & Profitability
+        right_groups = FACTOR_SCORECARD_GROUPS[2:]  # Financial Health, Market & Sentiment
+
         with col_a:
-            st.markdown(_factor_scorecard_rows_html(breakdown, families[:mid]), unsafe_allow_html=True)
+            html = ""
+            for label, accent, keys in left_groups:
+                html += _factor_group_html(label, accent, keys, breakdown)
+            st.markdown(html, unsafe_allow_html=True)
+
         with col_b:
-            st.markdown(_factor_scorecard_rows_html(breakdown, families[mid:]), unsafe_allow_html=True)
+            html = ""
+            for label, accent, keys in right_groups:
+                html += _factor_group_html(label, accent, keys, breakdown)
+            st.markdown(html, unsafe_allow_html=True)
 
 
 def render_price_history_card(ticker: str) -> None:
@@ -691,8 +715,9 @@ def render_analyst_card(analysis: dict) -> None:
     upside_color = "#10b981" if (implied_upside or 0) >= 0 else "#ef4444"
     upside_arrow = "↗" if (implied_upside or 0) >= 0 else "↘"
     upside_display = f"{implied_upside:+.0f}%" if implied_upside is not None else "—"
-    analysts_display = f"{int(num_analysts)} analysts" if num_analysts else ""
     target_range_html = _analyst_target_range_html(analyst)
+    upgrades = analyst.get("recent_upgrades", 0)
+    downgrades = analyst.get("recent_downgrades", 0)
 
     with st.container(border=True):
         st.markdown(
@@ -721,7 +746,9 @@ def render_analyst_card(analysis: dict) -> None:
                         text-transform:uppercase;letter-spacing:0.04em;margin-top:0.1rem;">
                         Implied upside</div>
                     {target_range_html}
-                    {f'<div style="font-size:0.68rem;color:#9ca3af;margin-top:0.25rem;">{analysts_display}</div>' if analysts_display else ''}
+                    <div style="font-size:0.68rem;color:#374151;margin-top:0.35rem;">
+                        Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -737,20 +764,12 @@ def render_analyst_card(analysis: dict) -> None:
                     "No rating mix</div>",
                     unsafe_allow_html=True,
                 )
-
-        detail_lines: list[str] = []
-        upgrades = analyst.get("recent_upgrades", 0)
-        downgrades = analyst.get("recent_downgrades", 0)
-        if upgrades or downgrades:
-            detail_lines.append(f"Recent: {upgrades} upgrades, {downgrades} downgrades")
-
-        actions = analyst.get("recent_actions", [])
-        if detail_lines or actions:
-            with st.expander("More analyst detail", expanded=False):
-                for line in detail_lines:
-                    st.caption(line)
-                if actions:
-                    st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
+            if num_analysts:
+                st.markdown(
+                    f'<div style="font-size:0.68rem;color:#9ca3af;text-align:center;margin-top:-0.1rem;">'
+                    f"{int(num_analysts)} analysts</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def render_factor_radar_card(analysis: dict, ticker: str) -> None:

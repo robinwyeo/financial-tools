@@ -136,19 +136,26 @@ def format_alert_email(alerts: list[dict[str, Any]], config: dict[str, Any]) -> 
     )
 
 
-def send_email(subject: str, html_body: str, config: dict[str, Any]) -> bool:
+def send_email(subject: str, html_body: str, config: dict[str, Any]) -> tuple[bool, str]:
+    """Send HTML email. Returns (success, message)."""
+    ready, status = smtp_config_status(config)
+    if not ready:
+        return False, status
+
     smtp = _get_smtp_config(config)
-    if not smtp["from_address"] or not smtp["to_address"] or not smtp["password"]:
-        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = smtp["from_address"]
+        msg["To"] = smtp["to_address"]
+        msg.attach(MIMEText(html_body, "html"))
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = smtp["from_address"]
-    msg["To"] = smtp["to_address"]
-    msg.attach(MIMEText(html_body, "html"))
-
-    with smtplib.SMTP(smtp["host"], int(smtp["port"])) as server:
-        server.starttls()
-        server.login(smtp["username"], smtp["password"])
-        server.sendmail(smtp["from_address"], [smtp["to_address"]], msg.as_string())
-    return True
+        with smtplib.SMTP(smtp["host"], int(smtp["port"])) as server:
+            server.starttls()
+            server.login(smtp["username"], smtp["password"])
+            server.sendmail(smtp["from_address"], [smtp["to_address"]], msg.as_string())
+        return True, f"sent to {smtp['to_address']}"
+    except smtplib.SMTPAuthenticationError:
+        return False, "SMTP authentication failed (check app password and SMTP_USERNAME)"
+    except Exception as exc:
+        return False, f"SMTP error: {exc}"

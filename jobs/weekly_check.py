@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 from core.config import load_config
 from core.scoring import score_ticker
 from core.universe import build_universe_snapshot, fetch_sp500_tickers, load_universe_snapshot
-from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email
+from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email, smtp_config_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -65,16 +65,20 @@ def run_weekly(
     logger.info("Weekly scan complete: %d Buy / %d scored", buy_count, len(results))
 
     if send_report and email_is_enabled(config):
+        ready, status = smtp_config_status(config)
+        logger.info("Email config: %s", status)
         subject, body = format_scorecard_email(
             results,
             config,
             title="Weekly S&P 500 Scorecard",
             subtitle=f"Full universe scan — {len(results)} ticker(s). Buys listed first.",
         )
-        if send_email(subject, body, config):
-            logger.info("Weekly scorecard email sent")
+        sent, message = send_email(subject, body, config)
+        if sent:
+            logger.info("Weekly scorecard email sent (%s)", message)
         else:
-            logger.warning("Email not sent (check SMTP credentials)")
+            logger.error("Email not sent: %s", message)
+            return 1
     elif send_report:
         logger.info("Email disabled; set email.enabled or SMTP_PASSWORD in environment")
 

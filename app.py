@@ -47,8 +47,8 @@ DEFAULT_PRICE_RANGE = "2Y"
 # Chart heights tuned so row-2 cards align when columns are stretched to equal height.
 CHART_HEIGHT_ROW2 = 228
 CHART_HEIGHT_PRICE = CHART_HEIGHT_ROW2
-CHART_HEIGHT_RADAR = CHART_HEIGHT_ROW2
-CHART_HEIGHT_ANALYST_PIE = 148
+CHART_HEIGHT_RADAR = 252
+CHART_HEIGHT_ANALYST_PIE = 192
 
 FACTOR_LABELS = {
     "value": "Value",
@@ -412,6 +412,79 @@ def inject_css() -> None:
         .composite-score-card {
             justify-content: flex-start;
         }
+        .composite-gauges-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-start;
+            justify-content: center;
+            width: 100%;
+        }
+        .composite-gauges-row .gauge-cell {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+        .composite-gauges-row .gauge-title {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #6b7280;
+            text-align: center;
+            margin-bottom: 0.15rem;
+            line-height: 1.2;
+        }
+        .factor-scorecard-card .factor-scorecard-grid {
+            align-content: start;
+        }
+        .factor-scorecard-card .factor-scorecard-col {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+        }
+        .analyst-consensus-card .analyst-targets {
+            display: flex;
+            gap: 0.35rem;
+            margin-top: 0.35rem;
+        }
+        .analyst-consensus-card .analyst-target-pill {
+            flex: 1;
+            min-width: 0;
+            text-align: center;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 0.4rem 0.35rem;
+        }
+        .analyst-consensus-card .analyst-target-pill .lbl {
+            font-size: 0.55rem;
+            font-weight: 700;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .analyst-consensus-card .analyst-target-pill .val {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: #1e3a5f;
+            margin-top: 0.15rem;
+        }
+        .analyst-consensus-card .analyst-chart-slot {
+            flex: 1 1 auto;
+            min-height: 140px;
+        }
+        .price-history-card {
+            padding-bottom: 0.45rem;
+        }
+        .price-history-card .price-position-strip {
+            margin-top: 0.4rem;
+            padding: 0.45rem 0 0.55rem;
+            border-top: 1px solid #e5e7eb;
+        }
+        .factor-radar-card .dashboard-chart-slot {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.25rem 0 0.35rem;
+        }
         .dashboard-chart-slot {
             flex: 1 1 auto;
             display: flex;
@@ -646,37 +719,15 @@ def render_company_header(analysis: dict) -> None:
             )
 
 
-def _bargain_score_html(bargain: dict | None) -> str:
-    """Compact bargain score block below the composite gauge."""
-    if not bargain:
-        return ""
-    score = bargain.get("score")
-    label, color = bargain_label_and_color(score)
-    bar_w = min(max(float(score), 0), 100) if score is not None else 0
-    score_txt = f"{score:.0f}" if score is not None else "N/A"
-    return (
-        '<div style="margin-top:0.5rem;padding-top:0.45rem;border-top:1px solid #e5e7eb;">'
-        '<div style="font-size:0.62rem;font-weight:600;color:#6b7280;text-transform:uppercase;'
-        'letter-spacing:0.05em;margin-bottom:0.25rem;">Bargain Score</div>'
-        '<div style="display:flex;align-items:center;gap:0.45rem;">'
-        f'<div style="font-size:1.15rem;font-weight:800;color:{color};min-width:2rem;">'
-        f"{score_txt}</div>"
-        '<div style="flex:1;">'
-        '<div style="height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;">'
-        f'<div style="width:{bar_w:.0f}%;height:100%;background:{color};border-radius:3px;"></div>'
-        "</div>"
-        f'<div style="font-size:0.72rem;font-weight:600;color:{color};margin-top:2px;">{label}</div>'
-        "</div></div>"
-        '<div style="font-size:0.58rem;color:#9ca3af;margin-top:0.2rem;line-height:1.3;">'
-        "Margin of safety · discount · RSI · upside"
-        "</div></div>"
-    )
-
-
 def _arc_gauge_html(
     score: float | None,
     label: str,
     label_color: str,
+    *,
+    subtitle: str = "vs. Global Universe",
+    aria_label: str = "Score gauge",
+    fill_color: str | None = None,
+    max_width: str = "130px",
 ) -> str:
     """
     Pure SVG 3/4-circle arc gauge.
@@ -696,26 +747,27 @@ def _arc_gauge_html(
     e = pt(start_deg + span_deg)
     bg_path = f"M {s[0]:.1f} {s[1]:.1f} A {r} {r} 0 1 1 {e[0]:.1f} {e[1]:.1f}"
 
-    # Teal fill arc proportional to score
+    # Fill arc proportional to score
     fill_svg = ""
+    stroke = fill_color or "#14b8a6"
     if score is not None and score > 0:
         fd = score * span_deg / 100.0
         fe = pt(start_deg + fd)
         large = 1 if fd > 180 else 0
         fill_svg = (
             f'<path d="M {s[0]:.1f} {s[1]:.1f} A {r} {r} 0 {large} 1 {fe[0]:.1f} {fe[1]:.1f}" '
-            f'fill="none" stroke="#14b8a6" stroke-width="{sw}" stroke-linecap="round"/>'
+            f'fill="none" stroke="{stroke}" stroke-width="{sw}" stroke-linecap="round"/>'
         )
 
     score_txt = f"{score:.0f}" if score is not None else "N/A"
-    font_sz = 36 if score is not None else 22
+    font_sz = 32 if score is not None and max_width != "130px" else (36 if score is not None else 22)
 
     # viewBox clips the empty gap at the bottom (arc endpoints sit at y≈122, cut at y=135)
     return (
-        '<div style="text-align:center;padding:0.3rem 0.25rem 0.15rem;">'
+        '<div style="text-align:center;padding:0.2rem 0.15rem 0.1rem;">'
         '<svg width="100%" viewBox="5 5 150 130" '
-        'style="max-width:130px;display:block;margin:0 auto;" '
-        'aria-label="Composite score gauge">'
+        f'style="max-width:{max_width};display:block;margin:0 auto;" '
+        f'aria-label="{aria_label}">'
         f'<path d="{bg_path}" fill="none" stroke="#e8ecef" '
         f'stroke-width="{sw}" stroke-linecap="round"/>'
         f'{fill_svg}'
@@ -725,9 +777,9 @@ def _arc_gauge_html(
         f'<text x="{cx}" y="100" text-anchor="middle" font-size="13" fill="#9ca3af" '
         f'font-family="Inter, Arial, sans-serif">/ 100</text>'
         '</svg>'
-        f'<div style="margin-top:0.15rem;">'
-        f'<div style="font-size:0.95rem;font-weight:700;color:{label_color};">{label}</div>'
-        '<div style="font-size:0.67rem;color:#9ca3af;margin-top:1px;">vs. Global Universe</div>'
+        f'<div style="margin-top:0.1rem;">'
+        f'<div style="font-size:0.88rem;font-weight:700;color:{label_color};">{label}</div>'
+        f'<div style="font-size:0.6rem;color:#9ca3af;margin-top:1px;line-height:1.25;">{subtitle}</div>'
         '</div>'
         '</div>'
     )
@@ -735,17 +787,41 @@ def _arc_gauge_html(
 
 def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
     composite = analysis.get("composite")
-    label, label_color = score_label_and_color(composite)
-    bargain = analysis.get("bargain")
+    comp_label, comp_color = score_label_and_color(composite)
+    bargain = analysis.get("bargain") or {}
+    bargain_score = bargain.get("score")
+    bargain_label, bargain_color = bargain_label_and_color(bargain_score)
+
+    composite_gauge = _arc_gauge_html(
+        composite,
+        comp_label,
+        comp_color,
+        subtitle="vs. Global Universe",
+        aria_label="Composite score gauge",
+        max_width="118px",
+    )
+    bargain_gauge = _arc_gauge_html(
+        bargain_score,
+        bargain_label,
+        bargain_color,
+        subtitle="Margin · discount · RSI",
+        aria_label="Bargain score gauge",
+        fill_color=bargain_color,
+        max_width="118px",
+    )
 
     with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body composite-score-card">'
-            '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;'
-            'text-align:center;margin-bottom:0.1rem;">Composite Score</div>'
-            + _arc_gauge_html(composite, label, label_color)
-            + _bargain_score_html(bargain)
-            + "</div>",
+            '<div class="composite-gauges-row">'
+            '<div class="gauge-cell">'
+            '<div class="gauge-title">Composite Score</div>'
+            + composite_gauge
+            + '</div>'
+            '<div class="gauge-cell">'
+            '<div class="gauge-title">Bargain Score</div>'
+            + bargain_gauge
+            + "</div></div></div>",
             unsafe_allow_html=True,
         )
 
@@ -755,12 +831,10 @@ def _factor_group_html(
     accent: str,
     factor_keys: list[str],
     breakdown: dict,
-    first: bool = False,
 ) -> str:
-    top_margin = "0" if first else "8px"
     header = (
         f'<div style="font-size:0.58rem;font-weight:700;color:{accent};text-transform:uppercase;'
-        f'letter-spacing:0.07em;margin:{top_margin} 0 3px;padding-bottom:2px;'
+        f'letter-spacing:0.07em;margin:0 0 4px;padding-bottom:2px;'
         f'border-bottom:1px solid {accent}22;'
         f'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{group_label}</div>'
     )
@@ -787,7 +861,7 @@ def _factor_group_html(
             f'<div class="factor-pct" style="color:{color};">{pct_text}</div>'
             f"</div>"
         )
-    return header + "\n".join(rows)
+    return f'<div class="factor-scorecard-group">{header}{"".join(rows)}</div>'
 
 
 def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> None:
@@ -796,12 +870,12 @@ def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> No
     with _card_shell(bordered):
         # 2-column CSS grid: left = Valuation + Quality, right = Financial Health + Market
         left_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
-            for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS[:2])
+            _factor_group_html(lbl, acc, keys, breakdown)
+            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[:2]
         )
         right_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
-            for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS[2:])
+            _factor_group_html(lbl, acc, keys, breakdown)
+            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[2:]
         )
         st.markdown(
             '<div class="dashboard-card-body factor-scorecard-card">'
@@ -813,8 +887,8 @@ def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> No
             '</div>'
             '<div class="factor-scorecard-grid" '
             'style="display:grid;grid-template-columns:1fr 1fr;column-gap:14px;overflow:hidden;flex:1;">'
-            f'<div style="min-width:0;">{left_html}</div>'
-            f'<div style="min-width:0;">{right_html}</div>'
+            f'<div class="factor-scorecard-col">{left_html}</div>'
+            f'<div class="factor-scorecard-col">{right_html}</div>'
             "</div></div>",
             unsafe_allow_html=True,
         )
@@ -851,9 +925,9 @@ def _price_position_strip_html(analysis: dict) -> str:
     ):
         pos = max(0.0, min(1.0, (price - low_52) / (high_52 - low_52)))
         range_bar = (
-            '<div style="margin-top:0.35rem;">'
-            '<div style="font-size:0.55rem;color:#9ca3af;margin-bottom:2px;">52W range</div>'
-            '<div style="position:relative;height:6px;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);'
+            '<div style="margin-top:0.45rem;padding-bottom:0.15rem;">'
+            '<div style="font-size:0.55rem;color:#9ca3af;margin-bottom:4px;">52W range</div>'
+            '<div style="position:relative;height:7px;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);'
             'border-radius:3px;">'
             f'<div style="position:absolute;left:{pos * 100:.1f}%;top:50%;transform:translate(-50%,-50%);'
             'width:10px;height:10px;background:#1e3a5f;border:2px solid #fff;border-radius:50%;'
@@ -861,7 +935,7 @@ def _price_position_strip_html(analysis: dict) -> str:
         )
 
     return (
-        '<div style="margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid #e5e7eb;">'
+        '<div class="price-position-strip">'
         '<div style="display:flex;gap:0.4rem;">'
         + pill("vs 52W High", _pct_below_high(price, high_52))
         + pill("vs ATH", _pct_below_high(price, ath))
@@ -928,7 +1002,7 @@ def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
 
         fig.update_layout(
             height=CHART_HEIGHT_PRICE,
-            margin=dict(l=10, r=10, t=16, b=8),
+            margin=dict(l=10, r=10, t=16, b=14),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             legend=dict(
@@ -985,7 +1059,7 @@ def _analyst_recommendations_pie(analyst: dict) -> go.Figure | None:
     fig.update_traces(textinfo="none", hoverinfo="skip")
     fig.update_layout(
         height=CHART_HEIGHT_ANALYST_PIE,
-        margin=dict(l=0, r=0, t=0, b=0),
+        margin=dict(l=0, r=0, t=4, b=4),
         showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)",
     )
@@ -993,19 +1067,19 @@ def _analyst_recommendations_pie(analyst: dict) -> go.Figure | None:
 
 
 def _analyst_target_range_html(analyst: dict) -> str:
-    parts: list[str] = []
-    if analyst.get("target_low") is not None:
-        parts.append(f"Low <b>${analyst['target_low']:,.0f}</b>")
-    if analyst.get("target_mean") is not None:
-        parts.append(f"Mean <b>${analyst['target_mean']:,.0f}</b>")
-    if analyst.get("target_high") is not None:
-        parts.append(f"High <b>${analyst['target_high']:,.0f}</b>")
-    if not parts:
+    pills: list[str] = []
+    for lbl, key in [("Low", "target_low"), ("Mean", "target_mean"), ("High", "target_high")]:
+        val = analyst.get(key)
+        if val is not None:
+            pills.append(
+                f'<div class="analyst-target-pill">'
+                f'<div class="lbl">{lbl}</div>'
+                f'<div class="val">${val:,.0f}</div>'
+                f"</div>"
+            )
+    if not pills:
         return ""
-    return (
-        f'<div style="font-size:0.68rem;color:#6b7280;line-height:1.3;margin-top:0.2rem;">'
-        f"{' · '.join(parts)}</div>"
-    )
+    return f'<div class="analyst-targets">{"".join(pills)}</div>'
 
 
 def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
@@ -1030,7 +1104,7 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
             <div>
             <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.3rem;">
                 Analyst Consensus</div>
-            <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;margin-bottom:0.25rem;">
+            <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;margin-bottom:0.2rem;">
                 <span style="display:inline-block;background:{bg_color};border-radius:999px;
                     padding:0.18rem 0.85rem;">
                     <span style="font-size:1.15rem;font-weight:800;color:{txt_color};">{consensus}</span>
@@ -1042,7 +1116,7 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
                     text-transform:uppercase;letter-spacing:0.04em;">implied upside</span>
             </div>
             {target_range_html}
-            <div style="font-size:0.64rem;color:#374151;margin-top:0.15rem;">
+            <div style="font-size:0.64rem;color:#374151;margin-top:0.25rem;margin-bottom:0.15rem;">
                 Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
             </div>
             </div>
@@ -1056,7 +1130,7 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
             st.plotly_chart(pie_fig, use_container_width=True, config={"displayModeBar": False})
 
         analysts_html = (
-            f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:-0.3rem;">'
+            f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:0.1rem;">'
             f"{int(num_analysts)} analysts</div>"
             if num_analysts
             else ""
@@ -1075,7 +1149,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
     with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body factor-radar-card">'
-            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.15rem;">'
+            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.05rem;">'
             "Factor Radar</div>"
             '<div class="dashboard-chart-slot">',
             unsafe_allow_html=True,
@@ -1117,7 +1191,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
             ),
             showlegend=False,
             height=CHART_HEIGHT_RADAR,
-            margin=dict(l=45, r=45, t=30, b=30),
+            margin=dict(l=38, r=38, t=18, b=18),
             paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -1214,7 +1288,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     # Row 1: Composite Score | Factor Scorecard
     # border=True on columns (not nested containers) — Streamlit's supported equal-height layout.
     _dashboard_row_anchor(1)
-    row1_left, row1_right = st.columns([1.8, 5.5], gap="small", border=True)
+    row1_left, row1_right = st.columns([2.6, 4.7], gap="small", border=True)
     with row1_left:
         render_composite_card(analysis, bordered=False)
     with row1_right:

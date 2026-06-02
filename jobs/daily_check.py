@@ -63,6 +63,8 @@ def run_daily(
         else:
             tickers = fetch_sp500_tickers()
         build_universe_snapshot(tickers=tickers, max_tickers=max_universe)
+    else:
+        logger.info("Skipping universe refresh (watchlist-only run; use --refresh or weekly_check.py to rebuild)")
 
     uni = load_universe_snapshot()
     if uni is None or uni.empty:

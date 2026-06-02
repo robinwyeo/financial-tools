@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily job: refresh universe snapshot, score watchlist, email morning scorecard."""
+"""Daily job: score watchlist and email morning scorecard (uses existing universe snapshot)."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def score_tickers(tickers: list[str], config: dict, uni) -> list[dict]:
 
 
 def run_daily(
-    refresh_universe: bool = True,
+    refresh_universe: bool = False,
     max_universe: int | None = None,
     send_report: bool = True,
     fast_universe: bool = False,
@@ -66,7 +66,10 @@ def run_daily(
 
     uni = load_universe_snapshot()
     if uni is None or uni.empty:
-        logger.error("Universe snapshot is empty; cannot score watchlist")
+        logger.error(
+            "Universe snapshot is empty. Run `python jobs/weekly_check.py` or "
+            "`python -m core.universe` first, or pass --refresh."
+        )
         return 1
 
     watchlist = load_watchlist(config)
@@ -98,7 +101,11 @@ def run_daily(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily watchlist scorecard email")
-    parser.add_argument("--no-refresh", action="store_true", help="Skip universe refresh")
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Rebuild universe snapshot first (slow; normally done by weekly_check.py)",
+    )
     parser.add_argument(
         "--max-universe",
         type=int,
@@ -111,7 +118,7 @@ if __name__ == "__main__":
 
     sys.exit(
         run_daily(
-            refresh_universe=not args.no_refresh,
+            refresh_universe=args.refresh,
             max_universe=args.max_universe,
             send_report=not args.no_email,
             fast_universe=args.fast,

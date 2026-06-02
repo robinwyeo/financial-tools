@@ -126,7 +126,7 @@ python jobs/weekly_check.py   # full S&P 500 (slow)
 ```
 
 Options for both:
-- `--no-refresh` — skip universe rebuild
+- `--refresh` (daily only) — rebuild universe snapshot first (slow; weekly job does this by default)
 - `--no-email` — skip email
 - `--fast` — smaller fallback universe (faster, good for dev)
 - `--max-universe N` / `--max N` — limit tickers processed

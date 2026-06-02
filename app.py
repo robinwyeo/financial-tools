@@ -1201,7 +1201,8 @@ def render_stock_view(ticker: str, config: dict) -> None:
     if analysis.get("is_good_buy"):
         st.success(
             f"Meets good-buy criteria (composite ≥ {thresholds['composite_min']}, "
-            f"upside ≥ {thresholds['implied_upside_min_pct']}%)"
+            f"upside ≥ {thresholds['implied_upside_min_pct']}%, "
+            f"bargain ≥ {thresholds['bargain_min']})"
         )
 
     # Company header card
@@ -1271,6 +1272,7 @@ def main() -> None:
         thresholds = get_thresholds(config)
         st.write(f"Composite ≥ {thresholds['composite_min']}")
         st.write(f"Upside ≥ {thresholds['implied_upside_min_pct']}%")
+        st.write(f"Bargain ≥ {thresholds['bargain_min']}")
         st.markdown("---")
         st.markdown("**Factor weights**")
         for k, v in get_factor_weights(config).items():

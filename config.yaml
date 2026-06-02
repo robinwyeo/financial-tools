@@ -4,6 +4,7 @@ universe:
   name: sp500
   sector_scoring: true  # score vs sector peers when sector has enough names
 
+# Fallback watchlist if `watchlist` file at repo root is missing or empty.
 watchlist:
   - AAPL
   - MSFT
@@ -17,7 +18,8 @@ watchlist:
   - NVO
 
 thresholds:
-  composite_min: 60
+  composite_min: 50
+  bargain_min: 50
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
 

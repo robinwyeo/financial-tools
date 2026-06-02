@@ -12,6 +12,7 @@ from core.config import get_factor_weights, load_config
 from core.data import build_raw_metrics, is_etf
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
+from core.watchlist import load_watchlist
 
 BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
     "margin_of_safety": 0.30,
@@ -280,11 +281,14 @@ def score_ticker(
     composite = scored_row.get("composite")
     factor_coverage_pct = scored_row.get("factor_coverage_pct")
     implied_upside = analyst.get("implied_upside_pct")
+    bargain_data = _bargain_fields(raw, factors, analyst)
+    bargain_score = (bargain_data.get("bargain") or {}).get("score")
     is_good_buy = _evaluate_good_buy(
         composite,
         implied_upside,
         analyst,
         thresholds,
+        bargain_score=bargain_score,
     )
 
     factor_breakdown = {}
@@ -315,7 +319,7 @@ def score_ticker(
         "is_good_buy": is_good_buy,
         "data_warnings": raw.get("data_warnings", []),
         "scored_row": scored_row,
-        **_bargain_fields(raw, factors, analyst),
+        **bargain_data,
     }
 
 
@@ -368,14 +372,19 @@ def _evaluate_good_buy(
     implied_upside: float | None,
     analyst: dict,
     thresholds: dict,
+    *,
+    bargain_score: float | None = None,
 ) -> bool:
-    composite_min = float(thresholds.get("composite_min", 70))
+    composite_min = float(thresholds.get("composite_min", 50))
+    bargain_min = float(thresholds.get("bargain_min", 50))
     upside_min = float(thresholds.get("implied_upside_min_pct", 15))
     exclude_sell = bool(thresholds.get("exclude_sell_consensus", True))
 
     if composite is None or composite < composite_min:
         return False
     if implied_upside is None or implied_upside < upside_min:
+        return False
+    if bargain_score is None or bargain_score < bargain_min:
         return False
     if exclude_sell and analyst.get("consensus_label") == "Sell":
         return False
@@ -385,7 +394,7 @@ def _evaluate_good_buy(
 def evaluate_watchlist(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Score all watchlist tickers and return those meeting good-buy criteria."""
     cfg = config or load_config()
-    watchlist = cfg.get("watchlist", [])
+    watchlist = load_watchlist(cfg)
     uni = load_universe_snapshot()
     results = []
     for ticker in watchlist:

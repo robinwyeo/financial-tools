@@ -1,14 +1,16 @@
 # Stock Metrics & Analyst Aggregation Tool
 
-Empirical factor scoring and aggregated analyst recommendations for stocks, with a daily email alert for watchlist names that meet your "good buy" threshold.
+Empirical factor scoring and aggregated analyst recommendations for stocks, with daily watchlist and weekly S&P 500 scorecard emails.
 
 ## Features
 
 - **Streamlit dashboard** — enter a ticker for factor scorecard, analyst consensus, price targets, and implied upside
 - **Extended factor set** — Value, Momentum (12-1), Quality, Low Volatility, Investment, Earnings Revisions, Piotroski F-Score
 - **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
+- **Bargain score** — absolute cheapness signal (margin of safety, drawdown, RSI, upside)
 - **ETF view** — basic fund info (no factor scoring)
-- **Daily GitHub Actions job** — refreshes universe snapshot and emails good-buy alerts
+- **Daily email** — morning scorecard for your watchlist (composite, bargain, upside, Buy/Not Buy)
+- **Weekly email** — Monday full S&P 500 scorecard
 
 ## Quick start (local)
 
@@ -31,35 +33,39 @@ Edit [`config.yaml`](config.yaml):
 
 | Section | Purpose |
 |---------|---------|
-| `watchlist` | Tickers checked daily |
-| `thresholds` | Good-buy rules (composite, upside %, exclude sell) |
+| `thresholds` | Buy rules (composite, bargain, upside %, exclude sell) |
 | `factor_weights` | Weight each factor family in composite score |
 | `email` | SMTP settings (or use env vars / GitHub Secrets) |
 
-Default good-buy rule: `composite >= 70` AND `implied_upside >= 15%` AND consensus is not Sell.
+**Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the daily job. If it is missing or empty, the app falls back to `watchlist` in `config.yaml`.
 
-## Daily job
+Default buy rule: `composite >= 50` AND `bargain >= 50` AND `implied_upside >= 15%` AND consensus is not Sell.
 
-```bash
-python jobs/daily_check.py --fast --max-universe 50
+## Email alerts setup
+
+### 1. Edit your watchlist
+
+```text
+# watchlist
+AAPL
+MSFT
+NVDA
 ```
 
-Options:
-- `--no-refresh` — skip universe rebuild
-- `--no-email` — skip email
-- `--fast` — smaller fallback universe (faster, good for dev)
+### 2. Configure SMTP
 
-## Deploy
+**Option A — local / cron:** set environment variables:
 
-### Streamlit Community Cloud
+```bash
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_FROM=you@gmail.com
+export SMTP_TO=you@gmail.com
+export SMTP_USERNAME=you@gmail.com
+export SMTP_PASSWORD=your-gmail-app-password
+```
 
-1. Push repo to GitHub
-2. [share.streamlit.io](https://share.streamlit.io) → New app → select repo, main file `app.py`
-3. Ensure `data/universe_snapshot.parquet` is committed (daily GHA refreshes it)
-
-### GitHub Actions (daily alerts)
-
-Add repository secrets:
+**Option B — GitHub Actions:** add the same values as repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Example |
 |--------|---------|
@@ -70,11 +76,60 @@ Add repository secrets:
 | `SMTP_USERNAME` | same as FROM |
 | `SMTP_PASSWORD` | Gmail [app password](https://support.google.com/accounts/answer/185833) |
 
-Enable email in `config.yaml` (`email.enabled: true`) or rely on `SMTP_PASSWORD` being set.
+Also set `email.enabled: true` in `config.yaml` (or rely on `SMTP_PASSWORD` being set).
 
-Workflow runs weekdays at 06:30 UTC (`.github/workflows/daily.yml`).
+### 3. Run jobs manually (test first)
 
-## Data sources (free)
+```bash
+# Daily watchlist scorecard (use --no-email to dry-run)
+python jobs/daily_check.py --no-email
+
+# Weekly S&P 500 scorecard (slow — full universe; use --fast --max 50 for dev)
+python jobs/weekly_check.py --no-email --fast --max 50
+```
+
+When ready, omit `--no-email` to send the HTML scorecard to your inbox.
+
+### 4. Schedule automatically
+
+**GitHub Actions** (included in repo):
+
+| Workflow | Schedule | What it does |
+|----------|----------|--------------|
+| `.github/workflows/daily.yml` | Every day 14:00 UTC | Watchlist scorecard email |
+| `.github/workflows/weekly.yml` | Mondays 14:00 UTC | Full S&P 500 scorecard email |
+
+Adjust cron times in the workflow files for your timezone (14:00 UTC ≈ 7:00 AM Pacific).
+
+**Local cron (macOS/Linux)** example:
+
+```cron
+0 7 * * * cd /path/to/financial-tools && .venv/bin/python jobs/daily_check.py
+0 7 * * 1 cd /path/to/financial-tools && .venv/bin/python jobs/weekly_check.py
+```
+
+Each email includes a table with **Composite**, **Bargain**, **Upside**, and **Buy / Not Buy** for every ticker. Buys are sorted to the top.
+
+## Deploy
+
+### Streamlit Community Cloud
+
+1. Push repo to GitHub
+2. [share.streamlit.io](https://share.streamlit.io) → New app → select repo, main file `app.py`
+3. Ensure `data/universe_snapshot.parquet` is committed (daily GHA refreshes it)
+
+## Daily / weekly jobs
+
+```bash
+python jobs/daily_check.py    # watchlist scorecard
+python jobs/weekly_check.py   # full S&P 500 (slow)
+```
+
+Options for both:
+- `--no-refresh` — skip universe rebuild
+- `--no-email` — skip email
+- `--fast` — smaller fallback universe (faster, good for dev)
+- `--max-universe N` / `--max N` — limit tickers processed
 
 - **yfinance** — prices, fundamentals, analyst recommendations, price targets
 - **Wikipedia** — S&P 500 constituent list
@@ -85,9 +140,10 @@ Workflow runs weekdays at 06:30 UTC (`.github/workflows/daily.yml`).
 ```
 core/           # data fetch, factors, scoring, analysts, universe
 app.py          # Streamlit dashboard
-jobs/           # daily_check.py, email_sender.py
-config.yaml     # watchlist, thresholds, weights
-data/           # universe_snapshot.parquet (refreshed daily)
+jobs/           # daily_check.py, weekly_check.py, email_sender.py
+watchlist       # your daily watchlist (one ticker per line)
+config.yaml     # thresholds, weights, email
+data/           # universe_snapshot.parquet (refreshed by jobs)
 ```
 
 ## Calibration (sample run, 30-ticker universe)

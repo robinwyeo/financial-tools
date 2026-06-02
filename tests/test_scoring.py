@@ -5,7 +5,12 @@ import pandas as pd
 import pytest
 
 from core.factors import FACTOR_SCORE_COLUMNS
-from core.scoring import _composite_and_coverage, compute_bargain_score, score_universe_df
+from core.scoring import (
+    _composite_and_coverage,
+    _evaluate_good_buy,
+    compute_bargain_score,
+    score_universe_df,
+)
 
 
 def _minimal_config() -> dict:
@@ -134,3 +139,18 @@ def test_compute_bargain_score_renormalizes_partial_data():
     assert result["score"] is not None
     assert result["components"]["discount_ath"] is not None
     assert result["components"]["margin_of_safety"] is None
+
+
+def test_evaluate_good_buy_requires_composite_upside_and_bargain():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "implied_upside_min_pct": 15,
+        "exclude_sell_consensus": True,
+    }
+    analyst = {"consensus_label": "Buy"}
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=60) is True
+    assert _evaluate_good_buy(49, 20, analyst, thresholds, bargain_score=60) is False
+    assert _evaluate_good_buy(55, 14, analyst, thresholds, bargain_score=60) is False
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=49) is False
+    assert _evaluate_good_buy(55, 20, {"consensus_label": "Sell"}, thresholds, bargain_score=60) is False

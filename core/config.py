@@ -55,7 +55,8 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config or load_config()
     t = cfg.get("thresholds", {})
     return {
-        "composite_min": float(t.get("composite_min", 70)),
+        "composite_min": float(t.get("composite_min", 50)),
+        "bargain_min": float(t.get("bargain_min", 50)),
         "implied_upside_min_pct": float(t.get("implied_upside_min_pct", 15)),
         "exclude_sell_consensus": bool(t.get("exclude_sell_consensus", True)),
     }

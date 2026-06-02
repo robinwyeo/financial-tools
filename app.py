@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -328,12 +331,22 @@ def consensus_style(label: str) -> tuple[str, str]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _dashboard_row_anchor(row: int) -> None:
-    """Invisible marker so CSS can target the next st.columns() row for equal-height cards."""
+    """Marker for JS equal-height pass on the following st.columns() row."""
     st.markdown(
         f'<div id="stock-row-{row}-anchor" class="stock-dashboard-row-anchor" '
         f'aria-hidden="true"></div>',
         unsafe_allow_html=True,
     )
+
+
+@contextmanager
+def _card_shell(bordered: bool) -> Iterator[None]:
+    """Dashboard cards use column borders; standalone cards keep st.container(border=True)."""
+    if bordered:
+        with st.container(border=True):
+            yield
+    else:
+        yield
 
 
 def inject_css() -> None:
@@ -363,48 +376,14 @@ def inject_css() -> None:
             background: white !important;
         }
 
-        /* Equal-height bordered cards in the two dashboard metric rows */
-        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stHorizontalBlock"],
-        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stHorizontalBlock"] {
-            align-items: stretch !important;
-        }
-        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stColumn"],
-        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stColumn"] {
-            display: flex !important;
-            flex-direction: column !important;
-            min-width: 0;
-        }
-        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stColumn"] > div,
-        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stColumn"] > div {
-            flex: 1 1 auto !important;
-            display: flex !important;
-            flex-direction: column !important;
-            min-height: 0;
-        }
-        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"],
-        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] {
-            flex: 1 1 auto !important;
-            height: 100% !important;
-            display: flex !important;
-            flex-direction: column !important;
-        }
-        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] > div,
-        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] > div {
-            flex: 1 1 auto !important;
-            display: flex !important;
-            flex-direction: column !important;
-            min-height: 0;
-        }
-
         .dashboard-card-body {
             display: flex;
             flex-direction: column;
             flex: 1 1 auto;
             min-height: 100%;
-            height: 100%;
         }
         .composite-score-card {
-            justify-content: center;
+            justify-content: flex-start;
         }
         .dashboard-chart-slot {
             flex: 1 1 auto;
@@ -487,6 +466,89 @@ def inject_css() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def inject_equal_height_js() -> None:
+    """Equalize dashboard row column heights in the main document (markdown strips <script>)."""
+    js = """
+(function () {
+  const doc = window.parent && window.parent.document ? window.parent.document : document;
+
+  function findRowForAnchor(anchorId) {
+    const anchor = doc.getElementById(anchorId);
+    if (!anchor) return null;
+    let box = anchor.closest(".element-container") || anchor.parentElement;
+    while (box) {
+      const sibling = box.nextElementSibling;
+      if (!sibling) break;
+      const row = sibling.querySelector('[data-testid="stHorizontalBlock"]');
+      if (row) return row;
+      box = sibling;
+    }
+    return null;
+  }
+
+  function columnShell(col) {
+    return (
+      col.querySelector('[data-testid="stVerticalBlockBorderWrapper"]') ||
+      col.querySelector(':scope > div > [data-testid="stVerticalBlock"]') ||
+      col
+    );
+  }
+
+  function equalizeRow(anchorId) {
+    const row = findRowForAnchor(anchorId);
+    if (!row) return;
+    const cols = row.querySelectorAll('[data-testid="stColumn"]');
+    if (cols.length < 2) return;
+
+    const shells = Array.from(cols).map(columnShell);
+    shells.forEach((el) => {
+      el.style.minHeight = "";
+    });
+    cols.forEach((c) => {
+      c.style.minHeight = "";
+    });
+
+    let maxH = 0;
+    shells.forEach((el) => {
+      maxH = Math.max(maxH, el.getBoundingClientRect().height);
+    });
+    if (maxH < 1) return;
+
+    const px = Math.ceil(maxH) + "px";
+    cols.forEach((c) => {
+      c.style.minHeight = px;
+    });
+    shells.forEach((el) => {
+      el.style.minHeight = px;
+    });
+  }
+
+  function run() {
+    equalizeRow("stock-row-1-anchor");
+    equalizeRow("stock-row-2-anchor");
+  }
+
+  const schedule = () => requestAnimationFrame(() => requestAnimationFrame(run));
+  if (!doc.defaultView.__stockRowEqualize) {
+    const win = doc.defaultView;
+    win.__stockRowEqualize = schedule;
+    win.addEventListener("resize", schedule);
+    const root = doc.querySelector('[data-testid="stAppViewContainer"]') || doc.body;
+    new MutationObserver(schedule).observe(root, { childList: true, subtree: true });
+  }
+  doc.defaultView.__stockRowEqualize();
+})();
+"""
+    html_fn = getattr(st, "html", None)
+    if html_fn is not None:
+        try:
+            html_fn(f"<script>{js}</script>", unsafe_allow_javascript=True)
+            return
+        except TypeError:
+            pass
+    components.html(f"<script>{js}</script>", height=0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -633,12 +695,12 @@ def _arc_gauge_html(
     )
 
 
-def render_composite_card(analysis: dict) -> None:
+def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
     composite = analysis.get("composite")
     label, label_color = score_label_and_color(composite)
     percentile_rank = int(round(composite)) if composite is not None else None
 
-    with st.container(border=True):
+    with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body composite-score-card">'
             '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;'
@@ -689,10 +751,10 @@ def _factor_group_html(
     return header + "\n".join(rows)
 
 
-def render_factor_scorecard_card(analysis: dict) -> None:
+def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> None:
     breakdown = analysis.get("factor_breakdown", {})
 
-    with st.container(border=True):
+    with _card_shell(bordered):
         # 2-column CSS grid: left = Valuation + Quality, right = Financial Health + Market
         left_html = "".join(
             _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
@@ -719,8 +781,8 @@ def render_factor_scorecard_card(analysis: dict) -> None:
         )
 
 
-def render_price_history_card(ticker: str) -> None:
-    with st.container(border=True):
+def render_price_history_card(ticker: str, *, bordered: bool = True) -> None:
+    with _card_shell(bordered):
         st.markdown('<div class="dashboard-card-body price-history-card">', unsafe_allow_html=True)
         header_col, range_col = st.columns([3, 2])
         with header_col:
@@ -852,7 +914,7 @@ def _analyst_target_range_html(analyst: dict) -> str:
     )
 
 
-def render_analyst_card(analysis: dict) -> None:
+def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
     analyst = analysis.get("analyst", {})
 
     consensus = analyst.get("consensus_label", "N/A")
@@ -867,7 +929,7 @@ def render_analyst_card(analysis: dict) -> None:
     upgrades = analyst.get("recent_upgrades", 0)
     downgrades = analyst.get("recent_downgrades", 0)
 
-    with st.container(border=True):
+    with _card_shell(bordered):
         st.markdown(
             f"""
             <div class="dashboard-card-body analyst-consensus-card">
@@ -913,10 +975,10 @@ def render_analyst_card(analysis: dict) -> None:
                 st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
 
 
-def render_factor_radar_card(analysis: dict, ticker: str) -> None:
+def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = True) -> None:
     breakdown = analysis.get("factor_breakdown", {})
 
-    with st.container(border=True):
+    with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body factor-radar-card">'
             '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.15rem;">'
@@ -1055,24 +1117,27 @@ def render_stock_view(ticker: str, config: dict) -> None:
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
     # Row 1: Composite Score | Factor Scorecard
+    # border=True on columns (not nested containers) — Streamlit's supported equal-height layout.
     _dashboard_row_anchor(1)
-    row1_left, row1_right = st.columns([1.8, 5.5], gap="small")
+    row1_left, row1_right = st.columns([1.8, 5.5], gap="small", border=True)
     with row1_left:
-        render_composite_card(analysis)
+        render_composite_card(analysis, bordered=False)
     with row1_right:
-        render_factor_scorecard_card(analysis)
+        render_factor_scorecard_card(analysis, bordered=False)
 
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
     # Row 2: Analyst Consensus | Price History | Factor Radar
     _dashboard_row_anchor(2)
-    row2_a, row2_b, row2_c = st.columns([2.2, 3.5, 1.8], gap="small")
+    row2_a, row2_b, row2_c = st.columns([2.2, 3.5, 1.8], gap="small", border=True)
     with row2_a:
-        render_analyst_card(analysis)
+        render_analyst_card(analysis, bordered=False)
     with row2_b:
-        render_price_history_card(ticker)
+        render_price_history_card(ticker, bordered=False)
     with row2_c:
-        render_factor_radar_card(analysis, ticker)
+        render_factor_radar_card(analysis, ticker, bordered=False)
+
+    inject_equal_height_js()
 
     with st.expander("Raw factor values"):
         st.json(analysis.get("factors_raw", {}))

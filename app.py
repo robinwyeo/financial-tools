@@ -41,10 +41,11 @@ PRICE_HISTORY_RANGES: dict[str, str] = {
 }
 DEFAULT_PRICE_RANGE = "2Y"
 
-# Chart heights tuned so the stock dashboard fits one viewport (no scroll).
-CHART_HEIGHT_PRICE = 225
-CHART_HEIGHT_RADAR = 235
-CHART_HEIGHT_ANALYST_PIE = 110
+# Chart heights tuned so row-2 cards align when columns are stretched to equal height.
+CHART_HEIGHT_ROW2 = 228
+CHART_HEIGHT_PRICE = CHART_HEIGHT_ROW2
+CHART_HEIGHT_RADAR = CHART_HEIGHT_ROW2
+CHART_HEIGHT_ANALYST_PIE = 148
 
 FACTOR_LABELS = {
     "value": "Value",
@@ -326,6 +327,15 @@ def consensus_style(label: str) -> tuple[str, str]:
 # Global CSS
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _dashboard_row_anchor(row: int) -> None:
+    """Invisible marker so CSS can target the next st.columns() row for equal-height cards."""
+    st.markdown(
+        f'<div id="stock-row-{row}-anchor" class="stock-dashboard-row-anchor" '
+        f'aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def inject_css() -> None:
     st.markdown(
         """
@@ -353,6 +363,114 @@ def inject_css() -> None:
             background: white !important;
         }
 
+        /* Equal-height bordered cards in the two dashboard metric rows */
+        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stHorizontalBlock"],
+        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stHorizontalBlock"] {
+            align-items: stretch !important;
+        }
+        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stColumn"],
+        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stColumn"] {
+            display: flex !important;
+            flex-direction: column !important;
+            min-width: 0;
+        }
+        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stColumn"] > div,
+        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stColumn"] > div {
+            flex: 1 1 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            min-height: 0;
+        }
+        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"],
+        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] {
+            flex: 1 1 auto !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .element-container:has(#stock-row-1-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] > div,
+        .element-container:has(#stock-row-2-anchor) + .element-container [data-testid="stVerticalBlockBorderWrapper"] > div {
+            flex: 1 1 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            min-height: 0;
+        }
+
+        .dashboard-card-body {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+            min-height: 100%;
+            height: 100%;
+        }
+        .composite-score-card {
+            justify-content: center;
+        }
+        .dashboard-chart-slot {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 0;
+        }
+
+        /* Factor scorecard rows: flexible percentile bars (wider on large viewports) */
+        .factor-scorecard-grid .factor-row {
+            display: grid;
+            grid-template-columns: 5px minmax(0, 1.1fr) minmax(56px, 2.85fr) 26px;
+            column-gap: 5px;
+            align-items: center;
+            margin: 2px 0;
+        }
+        .factor-scorecard-grid .factor-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+        }
+        .factor-scorecard-grid .factor-label {
+            font-size: 0.64rem;
+            color: #374151;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.15;
+            min-width: 0;
+        }
+        .factor-scorecard-grid .factor-bar-track {
+            background: #f3f4f6;
+            border-radius: 3px;
+            height: 5px;
+            overflow: hidden;
+            min-width: 0;
+        }
+        .factor-scorecard-grid .factor-bar-fill {
+            height: 5px;
+            border-radius: 3px;
+        }
+        .factor-scorecard-grid .factor-pct {
+            font-size: 0.62rem;
+            font-weight: 700;
+            text-align: right;
+        }
+        @media (min-width: 860px) {
+            .factor-scorecard-grid .factor-row {
+                grid-template-columns: 5px minmax(0, 0.95fr) minmax(68px, 3.4fr) 26px;
+                column-gap: 6px;
+            }
+        }
+        @media (min-width: 1100px) {
+            .factor-scorecard-grid .factor-row {
+                grid-template-columns: 5px minmax(0, 0.78fr) minmax(110px, 5.5fr) 28px;
+                column-gap: 7px;
+            }
+        }
+        @media (min-width: 1400px) {
+            .factor-scorecard-grid .factor-row {
+                grid-template-columns: 5px minmax(0, 0.62fr) minmax(160px, 7fr) 28px;
+                column-gap: 8px;
+            }
+        }
+
         /* Columns: prevent overflow in narrow slots */
         [data-testid="stColumn"] { min-width: 0; }
 
@@ -362,6 +480,9 @@ def inject_css() -> None:
         /* Hide footer */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
+        .stock-dashboard-row-anchor {
+            display: none;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -519,12 +640,11 @@ def render_composite_card(analysis: dict) -> None:
 
     with st.container(border=True):
         st.markdown(
+            '<div class="dashboard-card-body composite-score-card">'
             '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;'
-            'text-align:center;margin-bottom:0.1rem;">Composite Score</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            _arc_gauge_html(composite, label, label_color, percentile_rank),
+            'text-align:center;margin-bottom:0.1rem;">Composite Score</div>'
+            + _arc_gauge_html(composite, label, label_color, percentile_rank)
+            + "</div>",
             unsafe_allow_html=True,
         )
 
@@ -557,16 +677,13 @@ def _factor_group_html(
             pct_text = ordinal(int(round(float(pct))))
 
         rows.append(
-            f'<div style="display:flex;align-items:center;gap:4px;margin:2px 0;min-width:0;">'
-            f'<div style="width:5px;height:5px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-            f'<div style="flex:1 1 0;min-width:0;font-size:0.64rem;color:#374151;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;">'
-            f"{short_label}</div>"
-            f'<div style="width:34px;flex-shrink:0;background:#f3f4f6;border-radius:3px;height:4px;overflow:hidden;">'
-            f'<div style="width:{bar_w:.0f}%;height:4px;border-radius:3px;background:{color};"></div>'
+            f'<div class="factor-row">'
+            f'<div class="factor-dot" style="background:{color};"></div>'
+            f'<div class="factor-label">{short_label}</div>'
+            f'<div class="factor-bar-track">'
+            f'<div class="factor-bar-fill" style="width:{bar_w:.0f}%;background:{color};"></div>'
             f"</div>"
-            f'<div style="width:26px;font-size:0.62rem;font-weight:700;color:{color};'
-            f'text-align:right;flex-shrink:0;">{pct_text}</div>'
+            f'<div class="factor-pct" style="color:{color};">{pct_text}</div>'
             f"</div>"
         )
     return header + "\n".join(rows)
@@ -576,16 +693,6 @@ def render_factor_scorecard_card(analysis: dict) -> None:
     breakdown = analysis.get("factor_breakdown", {})
 
     with st.container(border=True):
-        st.markdown(
-            '<div style="display:flex;justify-content:space-between;align-items:center;'
-            'margin-bottom:0.35rem;">'
-            '<span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>'
-            '<span style="font-size:0.58rem;font-weight:600;color:#9ca3af;'
-            'text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
         # 2-column CSS grid: left = Valuation + Quality, right = Financial Health + Market
         left_html = "".join(
             _factor_group_html(lbl, acc, keys, breakdown, first=(i == 0))
@@ -596,16 +703,25 @@ def render_factor_scorecard_card(analysis: dict) -> None:
             for i, (lbl, acc, keys) in enumerate(FACTOR_SCORECARD_GROUPS[2:])
         )
         st.markdown(
-            '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:14px;overflow:hidden;">'
+            '<div class="dashboard-card-body factor-scorecard-card">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'margin-bottom:0.35rem;">'
+            '<span style="font-size:0.88rem;font-weight:700;color:#1e3a5f;">Factor Scorecard</span>'
+            '<span style="font-size:0.58rem;font-weight:600;color:#9ca3af;'
+            'text-transform:uppercase;letter-spacing:0.05em;">Percentile Rank</span>'
+            '</div>'
+            '<div class="factor-scorecard-grid" '
+            'style="display:grid;grid-template-columns:1fr 1fr;column-gap:14px;overflow:hidden;flex:1;">'
             f'<div style="min-width:0;">{left_html}</div>'
             f'<div style="min-width:0;">{right_html}</div>'
-            "</div>",
+            "</div></div>",
             unsafe_allow_html=True,
         )
 
 
 def render_price_history_card(ticker: str) -> None:
     with st.container(border=True):
+        st.markdown('<div class="dashboard-card-body price-history-card">', unsafe_allow_html=True)
         header_col, range_col = st.columns([3, 2])
         with header_col:
             st.markdown(
@@ -626,6 +742,7 @@ def render_price_history_card(ticker: str) -> None:
         hist = fetch_price_history(ticker, period=period)
         if hist.empty:
             st.info("No price history available for this timeframe.")
+            st.markdown("</div>", unsafe_allow_html=True)
             return
 
         fig = go.Figure()
@@ -685,7 +802,9 @@ def render_price_history_card(ticker: str) -> None:
             ),
             hovermode="x unified",
         )
+        st.markdown('<div class="dashboard-chart-slot">', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 def _analyst_recommendations_pie(analyst: dict) -> go.Figure | None:
@@ -749,9 +868,10 @@ def render_analyst_card(analysis: dict) -> None:
     downgrades = analyst.get("recent_downgrades", 0)
 
     with st.container(border=True):
-        # Single-column layout so it works at any width (including narrow embedded iframes).
         st.markdown(
             f"""
+            <div class="dashboard-card-body analyst-consensus-card">
+            <div>
             <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.3rem;">
                 Analyst Consensus</div>
             <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;margin-bottom:0.25rem;">
@@ -769,6 +889,8 @@ def render_analyst_card(analysis: dict) -> None:
             <div style="font-size:0.64rem;color:#374151;margin-top:0.15rem;">
                 Upgrades <b>{upgrades}</b> · Downgrades <b>{downgrades}</b>
             </div>
+            </div>
+            <div class="dashboard-chart-slot analyst-chart-slot">
             """,
             unsafe_allow_html=True,
         )
@@ -777,12 +899,13 @@ def render_analyst_card(analysis: dict) -> None:
         if pie_fig is not None:
             st.plotly_chart(pie_fig, use_container_width=True, config={"displayModeBar": False})
 
-        if num_analysts:
-            st.markdown(
-                f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:-0.3rem;">'
-                f"{int(num_analysts)} analysts</div>",
-                unsafe_allow_html=True,
-            )
+        analysts_html = (
+            f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:-0.3rem;">'
+            f"{int(num_analysts)} analysts</div>"
+            if num_analysts
+            else ""
+        )
+        st.markdown(f"</div>{analysts_html}</div>", unsafe_allow_html=True)
 
         actions = analyst.get("recent_actions", [])
         if actions:
@@ -795,8 +918,10 @@ def render_factor_radar_card(analysis: dict, ticker: str) -> None:
 
     with st.container(border=True):
         st.markdown(
+            '<div class="dashboard-card-body factor-radar-card">'
             '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.15rem;">'
-            "Factor Radar</div>",
+            "Factor Radar</div>"
+            '<div class="dashboard-chart-slot">',
             unsafe_allow_html=True,
         )
 
@@ -840,6 +965,7 @@ def render_factor_radar_card(analysis: dict, ticker: str) -> None:
             paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -929,8 +1055,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
     # Row 1: Composite Score | Factor Scorecard
-    # Two columns so the cards are naturally similar height and the scorecard
-    # is wide enough to be readable in the embedded blog iframe.
+    _dashboard_row_anchor(1)
     row1_left, row1_right = st.columns([1.8, 5.5], gap="small")
     with row1_left:
         render_composite_card(analysis)
@@ -940,6 +1065,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
 
     # Row 2: Analyst Consensus | Price History | Factor Radar
+    _dashboard_row_anchor(2)
     row2_a, row2_b, row2_c = st.columns([2.2, 3.5, 1.8], gap="small")
     with row2_a:
         render_analyst_card(analysis)

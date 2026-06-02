@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from core.factors import FACTOR_SCORE_COLUMNS
-from core.scoring import _composite_and_coverage, score_universe_df
+from core.scoring import _composite_and_coverage, compute_bargain_score, score_universe_df
 
 
 def _minimal_config() -> dict:
@@ -94,3 +94,43 @@ def test_score_universe_df_adds_factor_coverage():
     scored = score_universe_df(df, _minimal_config(), group_col=None)
     assert "factor_coverage_pct" in scored.columns
     assert scored["factor_coverage_pct"].iloc[0] == pytest.approx(100.0)
+
+
+def test_compute_bargain_score_high_when_discounted():
+    result = compute_bargain_score(
+        price=50.0,
+        graham_ratio=1.5,
+        all_time_high=100.0,
+        fifty_two_week_high=80.0,
+        rsi_14=25.0,
+        implied_upside_pct=30.0,
+    )
+    assert result["score"] is not None
+    assert result["score"] >= 70
+
+
+def test_compute_bargain_score_low_when_expensive():
+    result = compute_bargain_score(
+        price=95.0,
+        graham_ratio=0.9,
+        all_time_high=100.0,
+        fifty_two_week_high=98.0,
+        rsi_14=75.0,
+        implied_upside_pct=-5.0,
+    )
+    assert result["score"] is not None
+    assert result["score"] < 40
+
+
+def test_compute_bargain_score_renormalizes_partial_data():
+    result = compute_bargain_score(
+        price=50.0,
+        graham_ratio=None,
+        all_time_high=100.0,
+        fifty_two_week_high=None,
+        rsi_14=None,
+        implied_upside_pct=None,
+    )
+    assert result["score"] is not None
+    assert result["components"]["discount_ath"] is not None
+    assert result["components"]["margin_of_safety"] is None

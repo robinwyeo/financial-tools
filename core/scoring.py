@@ -13,6 +13,99 @@ from core.data import build_raw_metrics, is_etf
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
 
+BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
+    "margin_of_safety": 0.30,
+    "discount_ath": 0.25,
+    "discount_52w": 0.15,
+    "rsi_oversold": 0.15,
+    "analyst_upside": 0.15,
+}
+
+
+def _linear_score(value: float, low: float, high: float) -> float:
+    """Map value in [low, high] to 0-100, clamped."""
+    if high <= low:
+        return 0.0
+    pct = (value - low) / (high - low)
+    return float(max(0.0, min(100.0, pct * 100.0)))
+
+
+def compute_bargain_score(
+    price: float | None,
+    graham_ratio: float | None,
+    all_time_high: float | None,
+    fifty_two_week_high: float | None,
+    rsi_14: float | None,
+    implied_upside_pct: float | None,
+) -> dict[str, Any]:
+    """
+    Absolute 0-100 bargain score from fixed thresholds (higher = more of a bargain).
+    Renormalizes weights over components with available data.
+    """
+    components: dict[str, float | None] = {
+        "margin_of_safety": None,
+        "discount_ath": None,
+        "discount_52w": None,
+        "rsi_oversold": None,
+        "analyst_upside": None,
+    }
+
+    if graham_ratio is not None and graham_ratio > 0:
+        mos = graham_ratio - 1.0
+        components["margin_of_safety"] = _linear_score(mos, 0.0, 0.50)
+
+    if price is not None and all_time_high is not None and all_time_high > 0 and price > 0:
+        discount_ath = 1.0 - (price / all_time_high)
+        components["discount_ath"] = _linear_score(discount_ath, 0.0, 0.50)
+
+    if (
+        price is not None
+        and fifty_two_week_high is not None
+        and fifty_two_week_high > 0
+        and price > 0
+    ):
+        discount_52w = 1.0 - (price / fifty_two_week_high)
+        components["discount_52w"] = _linear_score(discount_52w, 0.0, 0.30)
+
+    if rsi_14 is not None:
+        components["rsi_oversold"] = _linear_score(70.0 - float(rsi_14), 0.0, 40.0)
+
+    if implied_upside_pct is not None:
+        components["analyst_upside"] = _linear_score(float(implied_upside_pct), 0.0, 40.0)
+
+    weighted_sum = 0.0
+    weight_available = 0.0
+    for key, sub_score in components.items():
+        if sub_score is None:
+            continue
+        w = BARGAIN_COMPONENT_WEIGHTS.get(key, 0.0)
+        weighted_sum += sub_score * w
+        weight_available += w
+
+    score = weighted_sum / weight_available if weight_available > 0 else None
+    return {"score": score, "components": components}
+
+
+def _bargain_fields(
+    raw: dict,
+    factors: dict,
+    analyst: dict,
+) -> dict[str, Any]:
+    """Build bargain score and related fields for analysis dict."""
+    bargain = compute_bargain_score(
+        price=raw.get("price"),
+        graham_ratio=factors.get("graham_ratio"),
+        all_time_high=raw.get("all_time_high"),
+        fifty_two_week_high=raw.get("fifty_two_week_high"),
+        rsi_14=raw.get("rsi_14"),
+        implied_upside_pct=analyst.get("implied_upside_pct"),
+    )
+    return {
+        "all_time_high": raw.get("all_time_high"),
+        "rsi_14": raw.get("rsi_14"),
+        "bargain": bargain,
+    }
+
 
 def winsorize(series: pd.Series, lower: float = 0.01, upper: float = 0.99) -> pd.Series:
     if series.dropna().empty:
@@ -222,6 +315,7 @@ def score_ticker(
         "is_good_buy": is_good_buy,
         "data_warnings": raw.get("data_warnings", []),
         "scored_row": scored_row,
+        **_bargain_fields(raw, factors, analyst),
     }
 
 
@@ -265,6 +359,7 @@ def _score_without_universe(
         "is_good_buy": False,
         "data_warnings": raw.get("data_warnings", []),
         "warning": "Universe snapshot missing. Run jobs/daily_check.py or core/universe.py to build it.",
+        **_bargain_fields(raw, factors, analyst),
     }
 
 

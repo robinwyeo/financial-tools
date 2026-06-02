@@ -187,6 +187,22 @@ def fetch_price_history(
         return pd.DataFrame()
 
 
+def fetch_all_time_high(ticker: str) -> float | None:
+    """Max adjusted close from full price history (cached)."""
+    cache_path = _cache_key("ath", ticker.upper())
+    cached = _read_cache(cache_path, max_age_hours=24)
+    if cached is not None:
+        return _safe_float(cached.get("all_time_high"))
+
+    hist = fetch_price_history(ticker, period="max")
+    if hist.empty or "Close" not in hist.columns:
+        return None
+    ath = _safe_float(hist["Close"].max())
+    if ath is not None:
+        _write_cache(cache_path, {"all_time_high": ath})
+    return ath
+
+
 def fetch_ticker_info(ticker: str) -> dict[str, Any]:
     """Fetch yfinance info dict with caching."""
     cache_path = _cache_key("info", ticker.upper())
@@ -385,6 +401,8 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     momentum_12_1 = _compute_momentum_12_1(hist)
     volatility_12m = _compute_volatility_12m(hist)
     drawdown_metrics = _compute_drawdown_metrics(hist)
+    rsi_14 = _compute_rsi(hist)
+    all_time_high = fetch_all_time_high(ticker)
 
     # Valuation / balance-sheet fields from info (book-inspired metrics)
     trailing_pe = _safe_float(info.get("trailingPE"))
@@ -467,9 +485,34 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "price_history": hist,
         "fifty_two_week_high": fifty_two_week_high,
         "fifty_two_week_low": fifty_two_week_low,
+        "all_time_high": all_time_high,
+        "rsi_14": rsi_14,
         "exchange": exchange,
         "data_warnings": data_warnings,
     }
+
+
+def _compute_rsi(hist: pd.DataFrame, period: int = 14) -> float | None:
+    """Wilder RSI (14-day default) from close prices."""
+    if hist.empty or "Close" not in hist.columns:
+        return None
+    closes = hist["Close"].dropna()
+    if len(closes) < period + 1:
+        return None
+
+    delta = closes.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    alpha = 1.0 / period
+    avg_gain = gain.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+
+    last_gain = avg_gain.iloc[-1]
+    last_loss = avg_loss.iloc[-1]
+    if last_loss == 0:
+        return 100.0 if last_gain > 0 else 50.0
+    rs = last_gain / last_loss
+    return float(100.0 - (100.0 / (1.0 + rs)))
 
 
 def _compute_momentum_12_1(hist: pd.DataFrame) -> float | None:

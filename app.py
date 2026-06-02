@@ -314,6 +314,33 @@ def score_label_and_color(score: float | None) -> tuple[str, str]:
     return "Poor", "#ef4444"
 
 
+def bargain_label_and_color(score: float | None) -> tuple[str, str]:
+    if score is None:
+        return "N/A", "#6b7280"
+    if score >= 70:
+        return "Bargain", "#22c55e"
+    if score >= 40:
+        return "Fair", "#eab308"
+    return "Expensive", "#ef4444"
+
+
+def _proximity_color(pct_below: float | None) -> str:
+    """Green = discounted, yellow = moderate, red = near highs."""
+    if pct_below is None:
+        return "#d1d5db"
+    if pct_below <= 0.10:
+        return "#ef4444"
+    if pct_below <= 0.25:
+        return "#eab308"
+    return "#22c55e"
+
+
+def _pct_below_high(price: float | None, high: float | None) -> float | None:
+    if price is None or high is None or high <= 0 or price <= 0:
+        return None
+    return max(0.0, 1.0 - (price / high))
+
+
 def consensus_style(label: str) -> tuple[str, str]:
     """Return (text_color, bg_color) for a consensus label."""
     lower = label.lower()
@@ -619,11 +646,37 @@ def render_company_header(analysis: dict) -> None:
             )
 
 
+def _bargain_score_html(bargain: dict | None) -> str:
+    """Compact bargain score block below the composite gauge."""
+    if not bargain:
+        return ""
+    score = bargain.get("score")
+    label, color = bargain_label_and_color(score)
+    bar_w = min(max(float(score), 0), 100) if score is not None else 0
+    score_txt = f"{score:.0f}" if score is not None else "N/A"
+    return (
+        '<div style="margin-top:0.5rem;padding-top:0.45rem;border-top:1px solid #e5e7eb;">'
+        '<div style="font-size:0.62rem;font-weight:600;color:#6b7280;text-transform:uppercase;'
+        'letter-spacing:0.05em;margin-bottom:0.25rem;">Bargain Score</div>'
+        '<div style="display:flex;align-items:center;gap:0.45rem;">'
+        f'<div style="font-size:1.15rem;font-weight:800;color:{color};min-width:2rem;">'
+        f"{score_txt}</div>"
+        '<div style="flex:1;">'
+        '<div style="height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;">'
+        f'<div style="width:{bar_w:.0f}%;height:100%;background:{color};border-radius:3px;"></div>'
+        "</div>"
+        f'<div style="font-size:0.72rem;font-weight:600;color:{color};margin-top:2px;">{label}</div>'
+        "</div></div>"
+        '<div style="font-size:0.58rem;color:#9ca3af;margin-top:0.2rem;line-height:1.3;">'
+        "Margin of safety · discount · RSI · upside"
+        "</div></div>"
+    )
+
+
 def _arc_gauge_html(
     score: float | None,
     label: str,
     label_color: str,
-    percentile_rank: int | None,
 ) -> str:
     """
     Pure SVG 3/4-circle arc gauge.
@@ -657,20 +710,6 @@ def _arc_gauge_html(
     score_txt = f"{score:.0f}" if score is not None else "N/A"
     font_sz = 36 if score is not None else 22
 
-    pct_html = ""
-    if percentile_rank is not None:
-        pct_html = (
-            '<div style="background:#f0fdfa;border-radius:8px;padding:0.3rem 0.6rem;'
-            'display:flex;align-items:center;gap:0.4rem;margin-top:0.25rem;text-align:left;">'
-            '<span style="font-size:0.85rem;">📈</span>'
-            '<div>'
-            '<div style="font-size:0.62rem;color:#6b7280;font-weight:500;">Percentile Rank</div>'
-            f'<div style="font-size:0.9rem;font-weight:700;color:#0d9488;">{ordinal(percentile_rank)}</div>'
-            '<div style="font-size:0.62rem;color:#9ca3af;">vs. Global Universe</div>'
-            '</div>'
-            '</div>'
-        )
-
     # viewBox clips the empty gap at the bottom (arc endpoints sit at y≈122, cut at y=135)
     return (
         '<div style="text-align:center;padding:0.3rem 0.25rem 0.15rem;">'
@@ -690,7 +729,6 @@ def _arc_gauge_html(
         f'<div style="font-size:0.95rem;font-weight:700;color:{label_color};">{label}</div>'
         '<div style="font-size:0.67rem;color:#9ca3af;margin-top:1px;">vs. Global Universe</div>'
         '</div>'
-        f'{pct_html}'
         '</div>'
     )
 
@@ -698,14 +736,15 @@ def _arc_gauge_html(
 def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
     composite = analysis.get("composite")
     label, label_color = score_label_and_color(composite)
-    percentile_rank = int(round(composite)) if composite is not None else None
+    bargain = analysis.get("bargain")
 
     with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body composite-score-card">'
             '<div style="font-size:0.83rem;font-weight:600;color:#6b7280;'
             'text-align:center;margin-bottom:0.1rem;">Composite Score</div>'
-            + _arc_gauge_html(composite, label, label_color, percentile_rank)
+            + _arc_gauge_html(composite, label, label_color)
+            + _bargain_score_html(bargain)
             + "</div>",
             unsafe_allow_html=True,
         )
@@ -781,7 +820,59 @@ def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> No
         )
 
 
-def render_price_history_card(ticker: str, *, bordered: bool = True) -> None:
+def _price_position_strip_html(analysis: dict) -> str:
+    """Colored pills: % below 52W high, % below ATH, optional 52wk range bar."""
+    price = analysis.get("price")
+    high_52 = analysis.get("fifty_two_week_high")
+    low_52 = analysis.get("fifty_two_week_low")
+    ath = analysis.get("all_time_high")
+
+    def pill(label: str, pct_below: float | None) -> str:
+        color = _proximity_color(pct_below)
+        if pct_below is None:
+            txt = "N/A"
+        else:
+            txt = f"{pct_below * 100:.1f}% below"
+        return (
+            f'<div style="flex:1;min-width:0;background:{color}18;border:1px solid {color}55;'
+            f'border-radius:8px;padding:0.35rem 0.5rem;text-align:center;">'
+            f'<div style="font-size:0.55rem;font-weight:600;color:#6b7280;text-transform:uppercase;'
+            f'letter-spacing:0.04em;">{label}</div>'
+            f'<div style="font-size:0.82rem;font-weight:700;color:{color};">{txt}</div>'
+            "</div>"
+        )
+
+    range_bar = ""
+    if (
+        price is not None
+        and low_52 is not None
+        and high_52 is not None
+        and high_52 > low_52
+    ):
+        pos = max(0.0, min(1.0, (price - low_52) / (high_52 - low_52)))
+        range_bar = (
+            '<div style="margin-top:0.35rem;">'
+            '<div style="font-size:0.55rem;color:#9ca3af;margin-bottom:2px;">52W range</div>'
+            '<div style="position:relative;height:6px;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);'
+            'border-radius:3px;">'
+            f'<div style="position:absolute;left:{pos * 100:.1f}%;top:50%;transform:translate(-50%,-50%);'
+            'width:10px;height:10px;background:#1e3a5f;border:2px solid #fff;border-radius:50%;'
+            'box-shadow:0 0 0 1px #94a3b8;"></div></div></div>'
+        )
+
+    return (
+        '<div style="margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid #e5e7eb;">'
+        '<div style="display:flex;gap:0.4rem;">'
+        + pill("vs 52W High", _pct_below_high(price, high_52))
+        + pill("vs ATH", _pct_below_high(price, ath))
+        + "</div>"
+        + range_bar
+        + "</div>"
+    )
+
+
+def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
+    ticker = analysis.get("ticker", "")
     with _card_shell(bordered):
         st.markdown('<div class="dashboard-card-body price-history-card">', unsafe_allow_html=True)
         header_col, range_col = st.columns([3, 2])
@@ -866,7 +957,10 @@ def render_price_history_card(ticker: str, *, bordered: bool = True) -> None:
         )
         st.markdown('<div class="dashboard-chart-slot">', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        st.markdown("</div></div>", unsafe_allow_html=True)
+        st.markdown(
+            _price_position_strip_html(analysis) + "</div></div>",
+            unsafe_allow_html=True,
+        )
 
 
 def _analyst_recommendations_pie(analyst: dict) -> go.Figure | None:
@@ -1133,7 +1227,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     with row2_a:
         render_analyst_card(analysis, bordered=False)
     with row2_b:
-        render_price_history_card(ticker, bordered=False)
+        render_price_history_card(analysis, bordered=False)
     with row2_c:
         render_factor_radar_card(analysis, ticker, bordered=False)
 

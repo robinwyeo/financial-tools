@@ -1,8 +1,10 @@
 """Tests for financial statement extraction and normalization."""
 
+import numpy as np
 import pandas as pd
 
 from core.data import (
+    _compute_rsi,
     extract_financial_values,
     normalize_debt_to_equity,
 )
@@ -83,3 +85,18 @@ def test_repurchase_does_not_use_purchase_of_business():
         df,
     )
     assert latest is None
+
+
+def test_compute_rsi_oversold():
+    """Declining prices should yield RSI below 50."""
+    n = 30
+    closes = 100.0 * np.exp(-np.linspace(0, 0.15, n))
+    hist = pd.DataFrame({"Close": closes})
+    rsi = _compute_rsi(hist, period=14)
+    assert rsi is not None
+    assert rsi < 50
+
+
+def test_compute_rsi_insufficient_data():
+    hist = pd.DataFrame({"Close": [100.0, 101.0, 99.0]})
+    assert _compute_rsi(hist, period=14) is None

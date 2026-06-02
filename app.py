@@ -45,10 +45,11 @@ PRICE_HISTORY_RANGES: dict[str, str] = {
 DEFAULT_PRICE_RANGE = "2Y"
 
 # Chart heights tuned so row-2 cards align when columns are stretched to equal height.
-CHART_HEIGHT_ROW2 = 228
+CHART_HEIGHT_ROW2 = 198
 CHART_HEIGHT_PRICE = CHART_HEIGHT_ROW2
-CHART_HEIGHT_RADAR = 252
-CHART_HEIGHT_ANALYST_PIE = 192
+CHART_HEIGHT_RADAR = 208
+CHART_HEIGHT_ANALYST_PIE = 158
+GAUGE_MAX_WIDTH = "132px"
 
 FACTOR_LABELS = {
     "value": "Value",
@@ -298,30 +299,27 @@ def percentile_color(pct: float | None) -> str:
     return "#22c55e"  # green
 
 
-def score_label_and_color(score: float | None) -> tuple[str, str]:
-    if score is None:
-        return "N/A", "#6b7280"
-    if score >= 85:
-        return "Excellent", "#059669"
-    if score >= 70:
-        return "Strong", "#10b981"
-    if score >= 55:
-        return "Good", "#14b8a6"
-    if score >= 45:
-        return "Average", "#6b7280"
-    if score >= 30:
-        return "Below Average", "#f59e0b"
-    return "Poor", "#ef4444"
+def gauge_score_color(score: float | None) -> str:
+    """Red ≤25, yellow 25–50, green ≥50 (aligned with scorecard traffic lights)."""
+    if score is None or (isinstance(score, float) and math.isnan(score)):
+        return "#d1d5db"
+    s = max(0.0, min(100.0, float(score)))
+    if s >= 50:
+        return "#22c55e"
+    if s <= 25:
+        return "#ef4444"
+    return "#eab308"
 
 
-def bargain_label_and_color(score: float | None) -> tuple[str, str]:
-    if score is None:
-        return "N/A", "#6b7280"
-    if score >= 70:
-        return "Bargain", "#22c55e"
-    if score >= 40:
-        return "Fair", "#eab308"
-    return "Expensive", "#ef4444"
+def gauge_score_label(score: float | None) -> str:
+    if score is None or (isinstance(score, float) and math.isnan(score)):
+        return "N/A"
+    s = float(score)
+    if s >= 50:
+        return "Good"
+    if s <= 25:
+        return "Weak"
+    return "Fair"
 
 
 def _proximity_color(pct_below: float | None) -> str:
@@ -414,10 +412,11 @@ def inject_css() -> None:
         }
         .composite-gauges-row {
             display: flex;
-            gap: 0.5rem;
-            align-items: flex-start;
+            gap: 0.45rem;
+            align-items: flex-end;
             justify-content: center;
             width: 100%;
+            padding: 0.15rem 0 0.1rem;
         }
         .composite-gauges-row .gauge-cell {
             flex: 1 1 0;
@@ -439,10 +438,17 @@ def inject_css() -> None:
             flex-direction: column;
             gap: 0.85rem;
         }
+        .analyst-consensus-card {
+            justify-content: center;
+            gap: 0.25rem;
+        }
+        .analyst-consensus-card .analyst-header-wrap {
+            flex: 0 0 auto;
+        }
         .analyst-consensus-card .analyst-targets {
             display: flex;
             gap: 0.35rem;
-            margin-top: 0.35rem;
+            margin-top: 0.3rem;
         }
         .analyst-consensus-card .analyst-target-pill {
             flex: 1;
@@ -467,8 +473,16 @@ def inject_css() -> None:
             margin-top: 0.15rem;
         }
         .analyst-consensus-card .analyst-chart-slot {
-            flex: 1 1 auto;
-            min-height: 140px;
+            flex: 0 0 auto;
+            min-height: unset;
+            margin: 0.2rem 0 0.05rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .factor-radar-card {
+            justify-content: center;
+            gap: 0.2rem;
         }
         .price-history-card {
             padding-bottom: 0.45rem;
@@ -479,11 +493,12 @@ def inject_css() -> None:
             border-top: 1px solid #e5e7eb;
         }
         .factor-radar-card .dashboard-chart-slot {
-            flex: 1 1 auto;
+            flex: 0 0 auto;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 0.25rem 0 0.35rem;
+            padding: 0.15rem 0;
+            margin: auto 0;
         }
         .dashboard-chart-slot {
             flex: 1 1 auto;
@@ -615,6 +630,10 @@ def inject_equal_height_js() -> None:
       maxH = Math.max(maxH, el.getBoundingClientRect().height);
     });
     if (maxH < 1) return;
+
+    if (anchorId === "stock-row-2-anchor") {
+      maxH = Math.min(maxH, 340);
+    }
 
     const px = Math.ceil(maxH) + "px";
     cols.forEach((c) => {
@@ -760,7 +779,8 @@ def _arc_gauge_html(
         )
 
     score_txt = f"{score:.0f}" if score is not None else "N/A"
-    font_sz = 32 if score is not None and max_width != "130px" else (36 if score is not None else 22)
+    compact = max_width != "130px"
+    font_sz = 34 if score is not None and compact else (36 if score is not None else 22)
 
     # viewBox clips the empty gap at the bottom (arc endpoints sit at y≈122, cut at y=135)
     return (
@@ -787,10 +807,12 @@ def _arc_gauge_html(
 
 def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
     composite = analysis.get("composite")
-    comp_label, comp_color = score_label_and_color(composite)
+    comp_color = gauge_score_color(composite)
+    comp_label = gauge_score_label(composite)
     bargain = analysis.get("bargain") or {}
     bargain_score = bargain.get("score")
-    bargain_label, bargain_color = bargain_label_and_color(bargain_score)
+    bargain_color = gauge_score_color(bargain_score)
+    bargain_label = gauge_score_label(bargain_score)
 
     composite_gauge = _arc_gauge_html(
         composite,
@@ -798,7 +820,8 @@ def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
         comp_color,
         subtitle="vs. Global Universe",
         aria_label="Composite score gauge",
-        max_width="118px",
+        fill_color=comp_color,
+        max_width=GAUGE_MAX_WIDTH,
     )
     bargain_gauge = _arc_gauge_html(
         bargain_score,
@@ -807,7 +830,7 @@ def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
         subtitle="Margin · discount · RSI",
         aria_label="Bargain score gauge",
         fill_color=bargain_color,
-        max_width="118px",
+        max_width=GAUGE_MAX_WIDTH,
     )
 
     with _card_shell(bordered):
@@ -1101,8 +1124,8 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
         st.markdown(
             f"""
             <div class="dashboard-card-body analyst-consensus-card">
-            <div>
-            <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.3rem;">
+            <div class="analyst-header-wrap">
+            <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.25rem;">
                 Analyst Consensus</div>
             <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;margin-bottom:0.2rem;">
                 <span style="display:inline-block;background:{bg_color};border-radius:999px;
@@ -1149,7 +1172,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
     with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body factor-radar-card">'
-            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.05rem;">'
+            '<div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0;">'
             "Factor Radar</div>"
             '<div class="dashboard-chart-slot">',
             unsafe_allow_html=True,
@@ -1191,7 +1214,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
             ),
             showlegend=False,
             height=CHART_HEIGHT_RADAR,
-            margin=dict(l=38, r=38, t=18, b=18),
+            margin=dict(l=32, r=32, t=12, b=12),
             paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})

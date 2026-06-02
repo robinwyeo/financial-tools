@@ -23,6 +23,18 @@ def _get_smtp_config(config: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def smtp_config_status(config: dict[str, Any]) -> tuple[bool, str]:
+    """Return (ready, reason). Does not expose secrets."""
+    smtp = _get_smtp_config(config)
+    if not smtp["from_address"]:
+        return False, "missing from address (set SMTP_FROM or email.from_address in config.yaml)"
+    if not smtp["to_address"]:
+        return False, "missing to address (set SMTP_TO or email.to_address in config.yaml)"
+    if not smtp["password"]:
+        return False, "missing SMTP password (set SMTP_PASSWORD secret or env var)"
+    return True, f"from={smtp['from_address']} to={smtp['to_address']} host={smtp['host']}"
+
+
 def email_is_enabled(config: dict[str, Any]) -> bool:
     email_cfg = config.get("email", {})
     return bool(email_cfg.get("enabled", False) or os.environ.get("SMTP_PASSWORD"))

@@ -72,7 +72,7 @@ def run_daily(
         )
         return 1
 
-    watchlist = load_watchlist(config)
+    watchlist = load_watchlist()
     if not watchlist:
         logger.warning("Watchlist is empty (edit the `watchlist` file at repo root)")
         return 1

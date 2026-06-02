@@ -4,19 +4,6 @@ universe:
   name: sp500
   sector_scoring: true  # score vs sector peers when sector has enough names
 
-# Fallback watchlist if `watchlist` file at repo root is missing or empty.
-watchlist:
-  - AAPL
-  - MSFT
-  - GOOGL
-  - NVDA
-  - AMZN
-  - META
-  - BRK-B
-  - COST
-  - LLY
-  - NVO
-
 thresholds:
   composite_min: 50
   bargain_min: 50

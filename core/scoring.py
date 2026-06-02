@@ -394,7 +394,7 @@ def _evaluate_good_buy(
 def evaluate_watchlist(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Score all watchlist tickers and return those meeting good-buy criteria."""
     cfg = config or load_config()
-    watchlist = load_watchlist(cfg)
+    watchlist = load_watchlist()
     uni = load_universe_snapshot()
     results = []
     for ticker in watchlist:

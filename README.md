@@ -37,7 +37,7 @@ Edit [`config.yaml`](config.yaml):
 | `factor_weights` | Weight each factor family in composite score |
 | `email` | SMTP settings (or use env vars / GitHub Secrets) |
 
-**Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the daily job. If it is missing or empty, the app falls back to `watchlist` in `config.yaml`.
+**Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the daily job.
 
 Default buy rule: `composite >= 50` AND `bargain >= 50` AND `implied_upside >= 15%` AND consensus is not Sell.
 

@@ -8,7 +8,9 @@ from core.factors import FACTOR_SCORE_COLUMNS
 from core.scoring import (
     _composite_and_coverage,
     _evaluate_good_buy,
+    _merge_ticker_row_with_universe,
     compute_bargain_score,
+    score_ticker,
     score_universe_df,
 )
 
@@ -139,6 +141,111 @@ def test_compute_bargain_score_renormalizes_partial_data():
     assert result["score"] is not None
     assert result["components"]["discount_ath"] is not None
     assert result["components"]["margin_of_safety"] is None
+
+
+def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
+    uni = pd.DataFrame(
+        [
+            {
+                "ticker": "AMZN",
+                "name": "Amazon.com, Inc.",
+                "sector": "Consumer Cyclical",
+                "value_composite": 0.05,
+                "garp": 2.3,
+            }
+        ]
+    )
+    live = {
+        "ticker": "AMZN",
+        "name": "AMZN",
+        "sector": None,
+        "value_composite": None,
+        "garp": None,
+    }
+    merged = _merge_ticker_row_with_universe(live, uni, "AMZN")
+    assert merged["name"] == "Amazon.com, Inc."
+    assert merged["sector"] == "Consumer Cyclical"
+    assert merged["value_composite"] == 0.05
+    assert merged["garp"] == 2.3
+
+
+def test_score_ticker_survives_empty_quote_info(monkeypatch):
+    """Partial yfinance info must not wipe universe snapshot factor rows."""
+    uni = pd.DataFrame(
+        [
+            {
+                "ticker": "AMZN",
+                "name": "Amazon.com, Inc.",
+                "sector": "Consumer Cyclical",
+                "industry": "Internet Retail",
+                "value_composite": 0.05,
+                "momentum_12_1": 0.1,
+                "quality_composite": 0.2,
+                "low_volatility": 0.3,
+                "investment": -0.1,
+                "earnings_revisions": 0.4,
+                "financial_strength": 7.0,
+                "garp": 2.3,
+                "balance_sheet_strength": 0.3,
+                "graham_value": 0.4,
+                "downside_protection": 0.5,
+                "earnings_quality": 0.6,
+                "shareholder_yield": 0.01,
+                "roic": 0.15,
+                "altman_z": 3.0,
+            },
+            {
+                "ticker": "MSFT",
+                "name": "Microsoft Corporation",
+                "sector": "Technology",
+                "industry": "Software",
+                "value_composite": 0.02,
+                "momentum_12_1": 0.15,
+                "quality_composite": 0.25,
+                "low_volatility": 0.25,
+                "investment": -0.05,
+                "earnings_revisions": 0.5,
+                "financial_strength": 8.0,
+                "garp": 1.8,
+                "balance_sheet_strength": 0.4,
+                "graham_value": 0.3,
+                "downside_protection": 0.6,
+                "earnings_quality": 0.7,
+                "shareholder_yield": 0.02,
+                "roic": 0.2,
+                "altman_z": 4.0,
+            },
+        ]
+    )
+
+    def fake_build(_ticker: str) -> dict:
+        return {
+            "ticker": "AMZN",
+            "name": "AMZN",
+            "sector": None,
+            "industry": None,
+            "price": 200.0,
+            "market_cap": 2e12,
+            "fifty_two_week_high": 220.0,
+            "fifty_two_week_low": 150.0,
+            "all_time_high": 230.0,
+            "data_warnings": [],
+            "recommendations": None,
+            "target_mean": 240.0,
+            "num_analysts": 40,
+        }
+
+    monkeypatch.setattr("core.scoring.build_raw_metrics", fake_build)
+    monkeypatch.setattr(
+        "core.scoring.compute_all_factors",
+        lambda _raw: {col: None for col in FACTOR_SCORE_COLUMNS.values()},
+    )
+
+    analysis = score_ticker("AMZN", _minimal_config(), universe_df=uni)
+    assert analysis["sector"] == "Consumer Cyclical"
+    assert analysis["name"] == "Amazon.com, Inc."
+    assert analysis["factor_breakdown"]["value"]["raw"] == 0.05
+    assert analysis["factor_breakdown"]["garp"]["raw"] == 2.3
 
 
 def test_evaluate_good_buy_requires_composite_upside_and_bargain():

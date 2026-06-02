@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import math
 import sys
 from contextlib import contextmanager
@@ -680,60 +681,74 @@ def render_company_header(analysis: dict) -> None:
     exchange = analysis.get("exchange") or ""
     sector = analysis.get("sector") or ""
     industry = analysis.get("industry") or ""
+    if sector.strip().lower() == "unknown":
+        sector = ""
+    if industry.strip().lower() == "unknown":
+        industry = ""
     market_cap = analysis.get("market_cap")
     price = analysis.get("price")
+
+    ticker_e = html.escape(str(ticker))
+    name_e = html.escape(str(name))
+    exchange_e = html.escape(str(exchange)) if exchange else ""
+    sector_e = html.escape(str(sector)) if sector else ""
+    industry_e = html.escape(str(industry)) if industry else ""
+
     price_html = (
-        f'<span style="font-size:1.25rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
+        f' <span style="font-size:1.25rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
         f"${price:,.2f}</span>"
         if price
+        else ""
+    )
+    exchange_html = (
+        f' <span style="color:#d1d5db;">|</span> '
+        f'<span style="font-size:0.88rem;color:#9ca3af;">{exchange_e}</span>'
+        if exchange_e
         else ""
     )
 
     left, right = st.columns([3, 2])
     with left:
-        exchange_html = (
-            f"<span style='color:#d1d5db;'>&nbsp;|&nbsp;</span>"
-            f"<span style='font-size:0.88rem;color:#9ca3af;'>{exchange}</span>"
-            if exchange else ""
-        )
+        # Single-level markup: Streamlit strips nested <div>s and can leak closing tags as text.
         st.markdown(
-            f"""
-            <div style="padding:0.05rem 0 0.1rem;">
-                <div style="display:flex;align-items:baseline;gap:0.6rem;flex-wrap:wrap;line-height:1.05;">
-                    <span style="font-size:1.55rem;font-weight:800;color:#1e3a5f;">{ticker}</span>
-                    {price_html}
-                </div>
-                <span style="font-size:0.82rem;color:#6b7280;">{name}</span>{exchange_html}
-            </div>
-            """,
+            f'<div style="padding:0.05rem 0 0.1rem;line-height:1.35;">'
+            f'<span style="font-size:1.55rem;font-weight:800;color:#1e3a5f;">{ticker_e}</span>'
+            f"{price_html}<br>"
+            f'<span style="font-size:0.82rem;color:#6b7280;">{name_e}</span>'
+            f"{exchange_html}"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
     with right:
         parts = []
-        if sector:
+        if sector_e:
             parts.append(
-                f'<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;'
-                f'text-transform:uppercase;letter-spacing:0.06em;">Sector</div>'
-                f'<div style="font-size:0.88rem;color:#374151;font-weight:500;">{sector}</div></div>'
+                f'<span style="display:inline-block;margin-left:1.25rem;">'
+                f'<span style="display:block;font-size:0.68rem;color:#9ca3af;font-weight:600;'
+                f'text-transform:uppercase;letter-spacing:0.06em;">Sector</span>'
+                f'<span style="display:block;font-size:0.88rem;color:#374151;font-weight:500;">'
+                f"{sector_e}</span></span>"
             )
-        if industry:
+        if industry_e:
             parts.append(
-                f'<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;'
-                f'text-transform:uppercase;letter-spacing:0.06em;">Industry</div>'
-                f'<div style="font-size:0.88rem;color:#374151;font-weight:500;">{industry}</div></div>'
+                f'<span style="display:inline-block;margin-left:1.25rem;">'
+                f'<span style="display:block;font-size:0.68rem;color:#9ca3af;font-weight:600;'
+                f'text-transform:uppercase;letter-spacing:0.06em;">Industry</span>'
+                f'<span style="display:block;font-size:0.88rem;color:#374151;font-weight:500;">'
+                f"{industry_e}</span></span>"
             )
         if market_cap:
             parts.append(
-                f'<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;'
-                f'text-transform:uppercase;letter-spacing:0.06em;">Market Cap</div>'
-                f'<div style="font-size:0.88rem;color:#374151;font-weight:700;">'
-                f'{fmt_large_number(market_cap)}</div></div>'
+                f'<span style="display:inline-block;margin-left:1.25rem;">'
+                f'<span style="display:block;font-size:0.68rem;color:#9ca3af;font-weight:600;'
+                f'text-transform:uppercase;letter-spacing:0.06em;">Market Cap</span>'
+                f'<span style="display:block;font-size:0.88rem;color:#374151;font-weight:700;">'
+                f"{html.escape(fmt_large_number(market_cap))}</span></span>"
             )
         if parts:
             st.markdown(
-                f'<div style="display:flex;gap:1.75rem;justify-content:flex-end;'
-                f'align-items:flex-start;padding:0.15rem 0 0.25rem;">{"".join(parts)}</div>',
+                f'<div style="text-align:right;padding:0.15rem 0 0.25rem;">{"".join(parts)}</div>',
                 unsafe_allow_html=True,
             )
 

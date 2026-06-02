@@ -5,6 +5,7 @@ import pandas as pd
 
 from core.data import (
     _compute_rsi,
+    _info_is_usable,
     extract_financial_values,
     normalize_debt_to_equity,
 )
@@ -100,3 +101,10 @@ def test_compute_rsi_oversold():
 def test_compute_rsi_insufficient_data():
     hist = pd.DataFrame({"Close": [100.0, 101.0, 99.0]})
     assert _compute_rsi(hist, period=14) is None
+
+
+def test_info_is_usable_requires_price_and_name():
+    assert not _info_is_usable({})
+    assert not _info_is_usable({"longName": "Amazon.com, Inc."})
+    assert not _info_is_usable({"currentPrice": 100.0})
+    assert _info_is_usable({"longName": "Amazon.com, Inc.", "currentPrice": 100.0})

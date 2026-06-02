@@ -192,6 +192,57 @@ def _composite_and_coverage(
     return composite, coverage
 
 
+def _is_meaningful_value(val: Any) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, float) and np.isnan(val):
+        return False
+    if isinstance(val, str):
+        stripped = val.strip()
+        if not stripped or stripped.lower() == "unknown":
+            return False
+    return True
+
+
+def _merge_ticker_row_with_universe(row: dict, uni: pd.DataFrame, ticker: str) -> dict:
+    """
+    Overlay a freshly built ticker row onto the universe snapshot row.
+    Keeps snapshot factor values when the live fetch is partial (e.g. empty quote info).
+    """
+    existing = uni[uni["ticker"].astype(str).str.upper() == ticker]
+    if existing.empty:
+        return row
+    merged = existing.iloc[0].to_dict()
+    for key, val in row.items():
+        if key == "ticker":
+            continue
+        if key == "name" and val == ticker:
+            continue
+        if _is_meaningful_value(val):
+            merged[key] = val
+    merged["ticker"] = ticker
+    return merged
+
+
+def _resolved_display_field(
+    raw: dict,
+    row: dict,
+    field: str,
+    *,
+    ticker: str,
+) -> Any:
+    """Prefer a meaningful live value, then universe snapshot, with name/ticker guard."""
+    val = raw.get(field)
+    if field == "name" and val == ticker:
+        val = None
+    if _is_meaningful_value(val):
+        return val
+    snap = row.get(field)
+    if field == "name" and snap == ticker:
+        return ticker
+    return snap if _is_meaningful_value(snap) else val
+
+
 def score_universe_df(
     factors_df: pd.DataFrame,
     config: dict[str, Any] | None = None,
@@ -259,7 +310,7 @@ def score_ticker(
         # Fallback: score without cross-section (raw percentiles unavailable)
         return _score_without_universe(ticker, raw, factors, analyst, cfg)
 
-    # Build row for this ticker
+    # Build row for this ticker; merge with snapshot so partial live fetches do not wipe factors.
     row = {
         "ticker": ticker,
         "name": raw.get("name"),
@@ -267,6 +318,7 @@ def score_ticker(
         "industry": raw.get("industry"),
         **factors,
     }
+    row = _merge_ticker_row_with_universe(row, uni, ticker)
     ticker_df = pd.DataFrame([row])
 
     # Append to universe for cross-section (or replace if exists)
@@ -293,20 +345,24 @@ def score_ticker(
 
     factor_breakdown = {}
     for family in FACTOR_SCORE_COLUMNS:
+        col = FACTOR_SCORE_COLUMNS[family]
         factor_breakdown[family] = {
-            "raw": factors.get(FACTOR_SCORE_COLUMNS[family]),
+            "raw": row.get(col),
             "percentile": scored_row.get(f"pct_{family}"),
             "z_score": scored_row.get(f"z_{family}"),
         }
 
+    factors_raw = {col: row.get(col) for col in FACTOR_SCORE_COLUMNS.values()}
+    factors_raw["trailing_pe"] = raw.get("trailing_pe")
+
     return {
         "ticker": ticker,
-        "name": raw.get("name"),
-        "sector": raw.get("sector"),
-        "industry": raw.get("industry"),
+        "name": _resolved_display_field(raw, row, "name", ticker=ticker),
+        "sector": _resolved_display_field(raw, row, "sector", ticker=ticker),
+        "industry": _resolved_display_field(raw, row, "industry", ticker=ticker),
         "exchange": raw.get("exchange"),
         "price": raw.get("price"),
-        "market_cap": raw.get("market_cap"),
+        "market_cap": raw.get("market_cap") or row.get("market_cap"),
         "dividend_yield": raw.get("dividend_yield"),
         "fifty_two_week_high": raw.get("fifty_two_week_high"),
         "fifty_two_week_low": raw.get("fifty_two_week_low"),
@@ -314,7 +370,7 @@ def score_ticker(
         "composite": composite,
         "factor_coverage_pct": factor_coverage_pct,
         "factor_breakdown": factor_breakdown,
-        "factors_raw": {**factors, "trailing_pe": raw.get("trailing_pe")},
+        "factors_raw": factors_raw,
         "analyst": analyst,
         "is_good_buy": is_good_buy,
         "data_warnings": raw.get("data_warnings", []),

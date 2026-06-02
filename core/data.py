@@ -203,17 +203,31 @@ def fetch_all_time_high(ticker: str) -> float | None:
     return ath
 
 
+def _info_is_usable(info: dict[str, Any]) -> bool:
+    """Quote summary must include price and a display name to be cached or trusted."""
+    if not info:
+        return False
+    has_price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice")) is not None
+    has_name = bool(info.get("longName") or info.get("shortName"))
+    return has_price and has_name
+
+
 def fetch_ticker_info(ticker: str) -> dict[str, Any]:
     """Fetch yfinance info dict with caching."""
     cache_path = _cache_key("info", ticker.upper())
     cached = _read_cache(cache_path, max_age_hours=24)
-    if cached is not None:
+    if cached is not None and _info_is_usable(cached):
         return cached
+    if cached is not None:
+        logger.warning("Ignoring stale/empty info cache for %s", ticker)
 
     try:
         info = yf.Ticker(ticker).info or {}
         serializable = {k: v for k, v in info.items() if isinstance(v, (str, int, float, bool, type(None)))}
-        _write_cache(cache_path, serializable)
+        if _info_is_usable(serializable):
+            _write_cache(cache_path, serializable)
+            return serializable
+        logger.warning("Quote info incomplete for %s (keys=%d)", ticker, len(serializable))
         return serializable
     except Exception as exc:
         logger.warning("Info fetch failed for %s: %s", ticker, exc)
@@ -344,6 +358,8 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     recs = fetch_analyst_recommendations(ticker)
 
     price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice"))
+    if price is None and not hist.empty and "Close" in hist.columns:
+        price = _safe_float(hist["Close"].iloc[-1])
     market_cap = _safe_float(info.get("marketCap"))
     enterprise_value = _safe_float(info.get("enterpriseValue"))
     book_value = _safe_float(info.get("bookValue"))
@@ -424,9 +440,17 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
 
     fifty_two_week_high = _safe_float(info.get("fiftyTwoWeekHigh"))
     fifty_two_week_low = _safe_float(info.get("fiftyTwoWeekLow"))
+    if not hist.empty and "Close" in hist.columns:
+        closes = hist["Close"].dropna()
+        if fifty_two_week_high is None and len(closes) > 0:
+            window = closes.tail(min(252, len(closes)))
+            fifty_two_week_high = _safe_float(window.max())
+        if fifty_two_week_low is None and len(closes) > 0:
+            window = closes.tail(min(252, len(closes)))
+            fifty_two_week_low = _safe_float(window.min())
     exchange = info.get("fullExchangeName") or info.get("exchange")
-    sector = info.get("sector") or "Unknown"
-    industry = info.get("industry") or "Unknown"
+    sector = info.get("sector")
+    industry = info.get("industry")
     name = info.get("longName") or info.get("shortName") or ticker.upper()
 
     return {

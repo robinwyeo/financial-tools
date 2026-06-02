@@ -48,5 +48,5 @@ email:
   enabled: true
   smtp_host: smtp.gmail.com
   smtp_port: 587
-  from_address: "robinwyeo@gmail.com"
-  to_address: "robinwyeo@gmail.com"
+  from_address: "robinwyeo.stock.alerts@gmail.com"
+  to_address: "robinwyeo.stock.alerts@gmail.com"

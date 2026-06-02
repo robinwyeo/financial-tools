@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from core.analysts import aggregate_analyst_data
-from core.config import get_factor_weights, load_config
+from core.config import get_factor_weights, get_thresholds, load_config
 from core.data import build_raw_metrics, is_etf
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
@@ -277,7 +277,7 @@ def score_ticker(
     scored = score_universe_df(combined, cfg)
     scored_row = scored[scored["ticker"] == ticker].iloc[0].to_dict()
 
-    thresholds = cfg.get("thresholds", {})
+    thresholds = get_thresholds(cfg)
     composite = scored_row.get("composite")
     factor_coverage_pct = scored_row.get("factor_coverage_pct")
     implied_upside = analyst.get("implied_upside_pct")

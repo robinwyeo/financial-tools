@@ -197,69 +197,67 @@ METRIC_HELP = {
     "etf_yield": "Income paid out by the fund, shown as an annual percent of price (dividends/distributions).",
 }
 
-# Short hover copy for Factor Scorecard (meaning + formula + rank note).
-_FACTOR_RANK_NOTE = "Bar = percentile vs universe (sector z-score when ≥5 peers)."
-
+# Hover copy for Factor Scorecard: what the metric means and how it's built.
 FACTOR_HELP: dict[str, str] = {
     "value": (
-        "Cheapness vs peers from earnings yield (EBIT/EV), book equity/market cap, and FCF yield. "
-        f"{_FACTOR_RANK_NOTE}"
+        "How cheap the stock is vs peers, averaging earnings yield (EBIT/EV), "
+        "book equity to market cap, and free-cash-flow yield. Higher = better priced."
     ),
     "momentum": (
-        "12-month price return skipping the last month. Higher bar = stronger recent trend. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Trailing 12-month price return, skipping the most recent month to avoid "
+        "short-term reversals. A higher rank means a stronger, more persistent uptrend."
     ),
     "quality": (
-        "Profitability: gross profit/assets, ROA, ROE, and net margin averaged. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Business profitability and efficiency, averaging gross profit/assets, "
+        "return on assets, return on equity, and net profit margin. Higher = stronger franchise."
     ),
     "low_volatility": (
-        "Inverse of 12-month annualized volatility; calmer stocks score higher. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Inverse of annualized volatility from the past year of daily returns. "
+        "Calmer, steadier stocks rank higher; jumpy, high-swing names rank lower."
     ),
     "investment": (
-        "Penalizes fast asset growth (year-over-year); slower expansion ranks higher. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Year-over-year growth in total assets, but inverted: companies that expand "
+        "their balance sheet slowly rank higher, since aggressive asset growth tends to lag."
     ),
     "earnings_revisions": (
-        "Analyst upgrades minus downgrades, blended with target-price upside when available. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Momentum in analyst sentiment — recent upgrades minus downgrades, blended "
+        "with how far the mean price target sits above the current price."
     ),
     "financial_strength": (
-        "Piotroski F-Score checklist (profitability, leverage, liquidity, efficiency). "
-        f"{_FACTOR_RANK_NOTE}"
+        "Piotroski F-Score: nine pass/fail tests across profitability, leverage, "
+        "liquidity, and operating efficiency. More checks passed means a healthier balance sheet."
     ),
     "garp": (
-        "Lynch-style (growth% + yield%) / P/E; higher = more growth per dollar of earnings multiple. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Growth at a reasonable price (Peter Lynch): (earnings growth % + dividend yield %) "
+        "divided by P/E. Higher = more growth and income per dollar of valuation."
     ),
     "balance_sheet_strength": (
-        "Net cash vs market cap and low debt/equity combined. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Balance-sheet resilience, combining net cash (cash minus debt) relative to "
+        "market cap with a low debt-to-equity ratio. Higher = more financial cushion."
     ),
     "graham_value": (
-        "Graham fair value vs price and current ratio averaged. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Benjamin Graham value test, averaging the Graham fair value vs price ratio "
+        "(√(22.5 × EPS × book value)) with the current ratio for liquidity safety."
     ),
     "downside_protection": (
-        "Smaller max drawdowns and lower downside volatility score higher (Marks-style). "
-        f"{_FACTOR_RANK_NOTE}"
+        "Resilience in bad markets (Howard Marks idea): rewards smaller historical "
+        "max drawdowns and lower downside-only volatility. Higher = gentler losses."
     ),
     "earnings_quality": (
-        "Low accruals (earnings close to operating cash flow) rank higher. "
-        f"{_FACTOR_RANK_NOTE}"
+        "How much reported profit is backed by real cash. Low accruals — earnings "
+        "close to operating cash flow — rank higher and signal cleaner accounting."
     ),
     "shareholder_yield": (
-        "Dividends plus net buybacks, divided by market cap (Faber yield). "
-        f"{_FACTOR_RANK_NOTE}"
+        "Total cash returned to owners (dividends plus net share buybacks) divided "
+        "by market cap (Meb Faber). Higher = more capital handed back to shareholders."
     ),
     "capital_efficiency": (
-        "ROIC = EBIT / invested capital (debt + equity − cash). "
-        f"{_FACTOR_RANK_NOTE}"
+        "Return on invested capital = EBIT ÷ (debt + equity − cash). Measures how "
+        "much operating profit the business earns per dollar of capital deployed."
     ),
     "distress_risk": (
-        "Altman Z from five balance-sheet ratios; higher Z = lower distress risk. "
-        f"{_FACTOR_RANK_NOTE}"
+        "Altman Z-Score from five balance-sheet and market ratios that flag bankruptcy "
+        "risk. A higher Z (rank) means lower distress risk and a safer financial profile."
     ),
 }
 

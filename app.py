@@ -197,118 +197,69 @@ METRIC_HELP = {
     "etf_yield": "Income paid out by the fund, shown as an annual percent of price (dividends/distributions).",
 }
 
-# (what it means, how raw score is built + how percentile is derived)
-_FACTOR_PERCENTILE_NOTE = (
-    "Percentile shown: raw value is winsorized at the 1st/99th universe percentiles, "
-    "z-scored vs same-sector peers when the sector has ≥5 stocks (otherwise vs the full universe), "
-    "then converted to a 0–100 rank (higher = better on that factor)."
-)
+# Short hover copy for Factor Scorecard (meaning + formula + rank note).
+_FACTOR_RANK_NOTE = "Bar = percentile vs universe (sector z-score when ≥5 peers)."
 
-FACTOR_HELP: dict[str, tuple[str, str]] = {
+FACTOR_HELP: dict[str, str] = {
     "value": (
-        "How cheap the stock looks vs peers using earnings power, book value, and free cash flow. "
-        "Higher percentile = relatively more “bang for your buck.”",
-        "Raw score = average of earnings yield (EBIT ÷ enterprise value), book equity ÷ market cap, "
-        "and free cash flow ÷ market cap (each skipped if data is missing). "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Cheapness vs peers from earnings yield (EBIT/EV), book equity/market cap, and FCF yield. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "momentum": (
-        "How much the share price rose over roughly the past year, skipping the most recent month "
-        "(classic 12‑month minus 1‑month momentum). Higher percentile = stronger recent trend.",
-        "Raw score = total return from ~12 months ago to ~1 month ago using daily closes. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "12-month price return skipping the last month. Higher bar = stronger recent trend. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "quality": (
-        "How profitable and efficient the business is—margins and returns on assets/equity. "
-        "Higher percentile = stronger underlying profitability vs peers.",
-        "Raw score = average of gross profit ÷ assets, net income ÷ assets (ROA), net income ÷ book equity (ROE), "
-        "and net income ÷ revenue (profit margin). "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Profitability: gross profit/assets, ROA, ROE, and net margin averaged. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "low_volatility": (
-        "How steady the stock has been—less day‑to‑day swinging over the last year. "
-        "Higher percentile = historically calmer price action.",
-        "Raw score = 1 ÷ annualized volatility (std of daily returns × √252 over ~12 months). "
-        "Lower realized vol → higher score. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Inverse of 12-month annualized volatility; calmer stocks score higher. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "investment": (
-        "Whether the company is rapidly expanding its asset base (plants, deals, etc.). "
-        "Empirical factor research often favors slower asset growth; higher percentile = less aggressive growth.",
-        "Asset growth = (total assets ÷ prior-year assets) − 1. Raw score = negative asset growth so "
-        "shrinking or slow-growing balance sheets rank higher. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Penalizes fast asset growth (year-over-year); slower expansion ranks higher. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "earnings_revisions": (
-        "Whether analyst sentiment and price targets have been improving. "
-        "Higher percentile = more positive revision tone vs peers.",
-        "Starts from recent recommendation changes (upgrades minus downgrades in the last ~20 actions) "
-        "and blends in target-price upside vs today’s price when available. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Analyst upgrades minus downgrades, blended with target-price upside when available. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "financial_strength": (
-        "Piotroski-style financial health checklist (profitability, leverage, liquidity, efficiency). "
-        "Higher percentile = healthier signals vs peers.",
-        "Counts up to nine binary tests (positive ROA/OCF, improving ROA, accruals quality, lower leverage, "
-        "higher current ratio, no share dilution, higher gross margin, higher asset turnover), scales to 0–9, "
-        "then normalized when some lines are missing. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Piotroski F-Score checklist (profitability, leverage, liquidity, efficiency). "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "garp": (
-        "Growth at a reasonable price (Peter Lynch PEG family). "
-        "Higher percentile = more earnings/dividend growth per unit of P/E vs peers.",
-        "Primary raw score = (earnings growth % + dividend yield %) ÷ trailing P/E; falls back to 1 ÷ PEG "
-        "when growth is unavailable. Higher raw = cheaper growth. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Lynch-style (growth% + yield%) / P/E; higher = more growth per dollar of earnings multiple. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "balance_sheet_strength": (
-        "Cash cushion vs debt and overall leverage. "
-        "Higher percentile = stronger balance sheet vs peers.",
-        "Raw score = average of net cash ÷ market cap (cash minus total debt) and 1 ÷ (1 + debt/equity) "
-        "so lower leverage scores higher. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Net cash vs market cap and low debt/equity combined. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "graham_value": (
-        "Benjamin Graham-style margin of safety and liquidity. "
-        "Higher percentile = more attractive on these classic value checks.",
-        "Raw score = average of Graham ratio (fair value ÷ price, fair value = √(22.5 × EPS × book value per share)) "
-        "and the current ratio (current assets ÷ current liabilities). "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Graham fair value vs price and current ratio averaged. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "downside_protection": (
-        "How severe past drawdowns and “bad day” volatility have been (Howard Marks–style downside risk). "
-        "Higher percentile = historically smaller drawdowns and gentler downside moves.",
-        "Raw score = average of −max drawdown (less negative drawdown is better) and 1 ÷ (1 + downside deviation), "
-        "where downside deviation uses only negative daily returns over ~12 months. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Smaller max drawdowns and lower downside volatility score higher (Marks-style). "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "earnings_quality": (
-        "Whether reported earnings are backed by cash flow (Sloan accruals idea). "
-        "Higher percentile = profits closer to operating cash vs peers.",
-        "Accruals = (net income − operating cash flow) ÷ total assets. Raw score = −accruals so "
-        "lower accounting-driven earnings rank higher. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Low accruals (earnings close to operating cash flow) rank higher. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "shareholder_yield": (
-        "Total cash returned to shareholders via dividends and buybacks relative to market cap "
-        "(Faber shareholder yield). Higher percentile = more cash returned per dollar of market value.",
-        "Raw score = (cash dividends paid + net share repurchases) ÷ market cap using cash-flow statement data "
-        "(repurchases treated as positive buyback dollars). "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Dividends plus net buybacks, divided by market cap (Faber yield). "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "capital_efficiency": (
-        "Return on invested capital (ROIC)—how much operating profit the business earns per dollar of capital employed "
-        "(Greenblatt Magic Formula). Higher percentile = more efficient capital use.",
-        "ROIC = EBIT ÷ invested capital, where invested capital = total debt + book equity − cash "
-        "(floored to avoid divide-by-near-zero). "
-        + _FACTOR_PERCENTILE_NOTE,
+        "ROIC = EBIT / invested capital (debt + equity − cash). "
+        f"{_FACTOR_RANK_NOTE}"
     ),
     "distress_risk": (
-        "Altman Z-Score distress model—probability of financial stress from five balance-sheet and market ratios. "
-        "Higher percentile = lower distress risk vs peers (Z above ~3 is often considered “safe”).",
-        "Z = 1.2×(working capital/assets) + 1.4×(retained earnings/assets) + 3.3×(EBIT/assets) "
-        "+ 0.6×(market cap/total liabilities) + 1.0×(revenue/assets); re-scaled if a component is missing. "
-        + _FACTOR_PERCENTILE_NOTE,
+        "Altman Z from five balance-sheet ratios; higher Z = lower distress risk. "
+        f"{_FACTOR_RANK_NOTE}"
     ),
 }
 
@@ -557,29 +508,24 @@ def inject_css() -> None:
         }
 
         /* Factor scorecard rows: flexible percentile bars (wider on large viewports) */
-        .factor-scorecard-card,
-        .factor-scorecard-card .factor-scorecard-grid {
+        .factor-scorecard-card {
             overflow: visible !important;
         }
         .factor-scorecard-grid .factor-row {
             display: grid;
-            grid-template-columns: 5px minmax(0, 1.1fr) minmax(56px, 2.85fr) 26px;
-            column-gap: 5px;
+            grid-template-columns: 5px minmax(4.8em, 1.05fr) minmax(56px, 2.85fr) 26px;
+            column-gap: 6px;
             align-items: center;
             margin: 2px 0;
-            position: relative;
-            z-index: 1;
         }
         .factor-scorecard-grid .factor-dot {
+            grid-column: 1;
             width: 5px;
             height: 5px;
             border-radius: 50%;
         }
-        .factor-scorecard-grid .factor-row:has(.factor-has-tip:hover),
-        .factor-scorecard-grid .factor-row:has(.factor-has-tip:focus-within) {
-            z-index: 40;
-        }
         .factor-scorecard-grid .factor-label {
+            grid-column: 2;
             font-size: 0.64rem;
             color: #374151;
             white-space: nowrap;
@@ -589,10 +535,20 @@ def inject_css() -> None:
             min-width: 0;
         }
         .factor-scorecard-grid .factor-label.factor-has-tip {
+            position: relative;
             cursor: help;
+            overflow: hidden;
+            z-index: 1;
+        }
+        .factor-scorecard-grid .factor-label.factor-has-tip:hover,
+        .factor-scorecard-grid .factor-label.factor-has-tip:focus-within {
+            z-index: 200;
             overflow: visible;
         }
         .factor-scorecard-grid .factor-label-text {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
             border-bottom: 1px dotted #9ca3af;
         }
         .factor-scorecard-grid .factor-tooltip {
@@ -601,42 +557,30 @@ def inject_css() -> None:
             pointer-events: none;
             position: absolute;
             left: 0;
-            bottom: calc(100% + 6px);
-            width: min(240px, 42vw);
-            max-width: 280px;
-            padding: 0.45rem 0.55rem;
+            top: calc(100% + 5px);
+            width: 11.5rem;
+            max-width: min(11.5rem, 70vw);
+            padding: 0.4rem 0.5rem;
             background: #1e293b;
             color: #f8fafc;
-            font-size: 0.62rem;
+            font-size: 0.6rem;
             font-weight: 400;
-            line-height: 1.35;
-            border-radius: 8px;
+            line-height: 1.3;
+            border-radius: 6px;
             box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
-            z-index: 50;
+            z-index: 201;
             text-transform: none;
             letter-spacing: normal;
             white-space: normal;
             transition: opacity 0.12s ease, visibility 0.12s ease;
         }
-        .factor-scorecard-grid .factor-tooltip::after {
+        .factor-scorecard-grid .factor-tooltip::before {
             content: "";
             position: absolute;
-            top: 100%;
-            left: 12px;
+            bottom: 100%;
+            left: 10px;
             border: 5px solid transparent;
-            border-top-color: #1e293b;
-        }
-        .factor-scorecard-grid .factor-tip-kicker {
-            display: block;
-            font-weight: 700;
-            color: #94a3b8;
-            font-size: 0.58rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin: 0.35rem 0 0.15rem;
-        }
-        .factor-scorecard-grid .factor-tip-kicker:first-child {
-            margin-top: 0;
+            border-bottom-color: #1e293b;
         }
         .factor-scorecard-grid .factor-has-tip:hover .factor-tooltip,
         .factor-scorecard-grid .factor-has-tip:focus-within .factor-tooltip {
@@ -644,6 +588,7 @@ def inject_css() -> None:
             opacity: 1;
         }
         .factor-scorecard-grid .factor-bar-track {
+            grid-column: 3;
             background: #f3f4f6;
             border-radius: 3px;
             height: 5px;
@@ -655,25 +600,26 @@ def inject_css() -> None:
             border-radius: 3px;
         }
         .factor-scorecard-grid .factor-pct {
+            grid-column: 4;
             font-size: 0.62rem;
             font-weight: 700;
             text-align: right;
         }
         @media (min-width: 860px) {
             .factor-scorecard-grid .factor-row {
-                grid-template-columns: 5px minmax(0, 0.95fr) minmax(68px, 3.4fr) 26px;
+                grid-template-columns: 5px minmax(5em, 0.95fr) minmax(68px, 3.4fr) 26px;
                 column-gap: 6px;
             }
         }
         @media (min-width: 1100px) {
             .factor-scorecard-grid .factor-row {
-                grid-template-columns: 5px minmax(0, 0.78fr) minmax(110px, 5.5fr) 28px;
+                grid-template-columns: 5px minmax(5.2em, 0.78fr) minmax(110px, 5.5fr) 28px;
                 column-gap: 7px;
             }
         }
         @media (min-width: 1400px) {
             .factor-scorecard-grid .factor-row {
-                grid-template-columns: 5px minmax(0, 0.62fr) minmax(160px, 7fr) 28px;
+                grid-template-columns: 5px minmax(5.5em, 0.62fr) minmax(160px, 7fr) 28px;
                 column-gap: 8px;
             }
         }
@@ -979,21 +925,14 @@ def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
 def _factor_label_html(factor_key: str, short_label: str) -> str:
     """Metric name with hover tooltip (meaning + calculation)."""
     label_e = html.escape(short_label)
-    help_entry = FACTOR_HELP.get(factor_key)
-    if not help_entry:
+    help_text = FACTOR_HELP.get(factor_key)
+    if not help_text:
         return f'<div class="factor-label">{label_e}</div>'
 
-    meaning, calculation = help_entry
-    tip_html = (
-        f'<span class="factor-tip-kicker">What it means</span>'
-        f"{html.escape(meaning)}"
-        f'<span class="factor-tip-kicker">How it&apos;s calculated</span>'
-        f"{html.escape(calculation)}"
-    )
     return (
         f'<div class="factor-label factor-has-tip" tabindex="0">'
         f'<span class="factor-label-text">{label_e}</span>'
-        f'<span class="factor-tooltip" role="tooltip">{tip_html}</span>'
+        f'<span class="factor-tooltip" role="tooltip">{html.escape(help_text)}</span>'
         f"</div>"
     )
 

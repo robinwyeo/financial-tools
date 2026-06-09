@@ -9,6 +9,8 @@ build/
 venv/
 .streamlit/secrets.toml
 data/cache/
+backtest/data/store/
+backtest/results/
 *.parquet.tmp
 .DS_Store
 .pytest_cache/

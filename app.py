@@ -138,7 +138,7 @@ METRIC_HELP = {
     "composite_score": (
         "Single number from 0–100 that blends how this stock ranks on value, quality, momentum, "
         "and other factors vs similar companies. Higher = the model likes it more overall; "
-        "70+ is the default “good buy” bar in this app. Only factors with available data are "
+        "50+ is the configured composite_min good-buy bar (see config.yaml). Only factors with available data are "
         "included; check Factor Coverage to see how complete the score is."
     ),
     "price": (

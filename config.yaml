@@ -5,44 +5,49 @@ universe:
   sector_scoring: true  # score vs sector peers when sector has enough names
 
 thresholds:
-  composite_min: 50
-  bargain_min: 50
+  composite_min: 50.9
+  bargain_min: 43.2
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
 
 # Weights are assigned at the THEME level first, then split across the
-# correlated sub-factors within each theme. This makes the intended factor
-# exposures explicit and prevents a theme from being over-weighted just
-# because it contains more sub-factors. Theme totals are shown in comments.
-# (Weights are renormalized at runtime over whichever factors have data, so
-#  the relative proportions are what matter.)
+# correlated sub-factors within each theme. Theme totals from backtest tuning
+# (2026-06-09 partial run; re-run `python -m backtest.run pipeline` for full history).
 factor_weights:
-  # Value theme (0.21) — cheapness
-  value: 0.07
-  garp: 0.07
-  graham_value: 0.07
+  # Value theme — cheapness
+  value: 0.048
+  garp: 0.048
+  graham_value: 0.048
 
-  # Quality theme (0.24) — profitability & financial soundness
-  quality: 0.06
-  financial_strength: 0.06
-  earnings_quality: 0.06
-  capital_efficiency: 0.06
+  # Quality theme — profitability & financial soundness
+  quality: 0.0569
+  financial_strength: 0.0569
+  earnings_quality: 0.0569
+  capital_efficiency: 0.0569
 
-  # Trend theme (0.15) — price & estimate momentum
-  momentum: 0.08
+  # Trend theme — price momentum (earnings_revisions untuned; no historical analyst data)
+  momentum: 0.0526
   earnings_revisions: 0.07
 
-  # Risk theme (0.10) — return volatility & drawdowns
-  low_volatility: 0.05
-  downside_protection: 0.05
+  # Risk theme — return volatility & drawdowns
+  low_volatility: 0.1542
+  downside_protection: 0.1542
 
-  # Solvency theme (0.10) — balance-sheet & distress risk
-  balance_sheet_strength: 0.05
-  distress_risk: 0.05
+  # Solvency theme — balance-sheet & distress risk
+  balance_sheet_strength: 0.0076
+  distress_risk: 0.0076
 
-  # Capital-allocation theme (0.20) — cash returns & disciplined investment
-  shareholder_yield: 0.10
-  investment: 0.10
+  # Capital-allocation theme — cash returns & disciplined investment
+  shareholder_yield: 0.1262
+  investment: 0.1262
+
+# Bargain score component weights (renormalized when data is missing).
+bargain_weights:
+  margin_of_safety: 0.6557
+  discount_ath: 0.0397
+  discount_52w: 0.0315
+  rsi_oversold: 0.1231
+  analyst_upside: 0.15
 
 email:
   enabled: true

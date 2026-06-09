@@ -51,6 +51,22 @@ def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]
     return {family: float(weights.get(family, default)) for family, default in _DEFAULT_WEIGHTS.items()}
 
 
+_DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
+    "margin_of_safety": 0.30,
+    "discount_ath": 0.25,
+    "discount_52w": 0.15,
+    "rsi_oversold": 0.15,
+    "analyst_upside": 0.15,
+}
+
+
+def get_bargain_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
+    """Return bargain component weights from config, falling back to defaults."""
+    cfg = config or load_config()
+    weights = cfg.get("bargain_weights", {})
+    return {key: float(weights.get(key, default)) for key, default in _DEFAULT_BARGAIN_WEIGHTS.items()}
+
+
 def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config or load_config()
     t = cfg.get("thresholds", {})

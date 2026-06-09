@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from core.analysts import aggregate_analyst_data
-from core.config import get_factor_weights, get_thresholds, load_config
+from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
 from core.data import build_raw_metrics, is_etf
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
@@ -38,6 +38,7 @@ def compute_bargain_score(
     fifty_two_week_high: float | None,
     rsi_14: float | None,
     implied_upside_pct: float | None,
+    component_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """
     Absolute 0-100 bargain score from fixed thresholds (higher = more of a bargain).
@@ -74,12 +75,13 @@ def compute_bargain_score(
     if implied_upside_pct is not None:
         components["analyst_upside"] = _linear_score(float(implied_upside_pct), 0.0, 40.0)
 
+    weights = component_weights or BARGAIN_COMPONENT_WEIGHTS
     weighted_sum = 0.0
     weight_available = 0.0
     for key, sub_score in components.items():
         if sub_score is None:
             continue
-        w = BARGAIN_COMPONENT_WEIGHTS.get(key, 0.0)
+        w = weights.get(key, 0.0)
         weighted_sum += sub_score * w
         weight_available += w
 
@@ -91,6 +93,7 @@ def _bargain_fields(
     raw: dict,
     factors: dict,
     analyst: dict,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build bargain score and related fields for analysis dict."""
     bargain = compute_bargain_score(
@@ -100,6 +103,7 @@ def _bargain_fields(
         fifty_two_week_high=raw.get("fifty_two_week_high"),
         rsi_14=raw.get("rsi_14"),
         implied_upside_pct=analyst.get("implied_upside_pct"),
+        component_weights=get_bargain_weights(config),
     )
     return {
         "all_time_high": raw.get("all_time_high"),
@@ -333,7 +337,7 @@ def score_ticker(
     composite = scored_row.get("composite")
     factor_coverage_pct = scored_row.get("factor_coverage_pct")
     implied_upside = analyst.get("implied_upside_pct")
-    bargain_data = _bargain_fields(raw, factors, analyst)
+    bargain_data = _bargain_fields(raw, factors, analyst, cfg)
     bargain_score = (bargain_data.get("bargain") or {}).get("score")
     is_good_buy = _evaluate_good_buy(
         composite,
@@ -419,7 +423,7 @@ def _score_without_universe(
         "is_good_buy": False,
         "data_warnings": raw.get("data_warnings", []),
         "warning": "Universe snapshot missing. Run jobs/daily_check.py or core/universe.py to build it.",
-        **_bargain_fields(raw, factors, analyst),
+        **_bargain_fields(raw, factors, analyst, cfg),
     }
 
 

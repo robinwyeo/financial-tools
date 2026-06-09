@@ -146,6 +146,36 @@ config.yaml     # thresholds, weights, email
 data/           # universe_snapshot.parquet (refreshed by jobs)
 ```
 
+## Historical backtest (weight & threshold tuning)
+
+The `backtest/` package runs a walk-forward simulation on historical S&P 500
+constituents (1996+) using SEC EDGAR point-in-time fundamentals and yfinance
+prices. It tunes composite factor weights, bargain weights, and good-buy
+thresholds against rolling 3-year outperformance vs SPY.
+
+```bash
+# Full pipeline (slow: hours for complete SEC + price ingest)
+python -m backtest.run pipeline --apply
+
+# Individual steps
+python -m backtest.run ingest
+python -m backtest.run build-factors
+python -m backtest.run tune
+python -m backtest.run calibrate
+python -m backtest.run dca
+python -m backtest.run report
+python -m backtest.run apply
+```
+
+Quick dev run (limited quarters/tickers):
+
+```bash
+python -m backtest.run pipeline --max-edgar-quarters 8 --max-quarters 8 --max-tickers 80 --n-samples 30
+```
+
+Results are written to `backtest/results/` (report, tuning JSON, DCA validation).
+Cached data lives in `backtest/data/store/` (gitignored).
+
 ## Calibration (sample run, 30-ticker universe)
 
 Spot-check results after building the snapshot:
@@ -155,9 +185,9 @@ Spot-check results after building the snapshot:
 | KO | High value | ~88th percentile value |
 | NVDA | High momentum / revisions | ~73rd momentum, ~91st earnings revisions |
 | JPM | Moderate value, strong momentum | ~31st value, ~93rd momentum |
-| AAPL | Balanced mega-cap | ~48 composite (below default 70 threshold) |
+| AAPL | Balanced mega-cap | ~48 composite (below default 50 threshold) |
 
-NVDA shows high analyst upside (~40%) but composite below 70 due to weak value/low-vol scores — the default rule correctly avoids flagging it as a "good buy" on factors alone. Tune `thresholds` and `factor_weights` to match your strategy.
+NVDA shows high analyst upside (~40%) but composite below 50 due to weak value/low-vol scores — the default rule correctly avoids flagging it as a "good buy" on factors alone. Tune `thresholds` and `factor_weights` via the backtest harness or edit `config.yaml` directly.
 
 To rebuild with more tickers for better cross-sections:
 

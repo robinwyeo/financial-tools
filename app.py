@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from core.config import get_factor_weights, get_thresholds, load_config
+from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
 from core.data import fetch_etf_holdings, fetch_etf_info, fetch_price_history, is_etf
 from core.scoring import score_ticker, score_universe
 from core.universe import load_universe_snapshot
@@ -68,6 +68,14 @@ FACTOR_LABELS = {
     "shareholder_yield": "Shareholder Yield",
     "capital_efficiency": "Capital Efficiency (ROIC)",
     "distress_risk": "Distress Risk (Altman Z)",
+}
+
+BARGAIN_LABELS = {
+    "margin_of_safety": "Margin of Safety",
+    "discount_ath": "Discount to All-Time High",
+    "discount_52w": "Discount to 52-Week High",
+    "rsi_oversold": "RSI Oversold",
+    "analyst_upside": "Analyst Upside",
 }
 
 SHORT_FACTOR_LABELS = {
@@ -1451,15 +1459,29 @@ def main() -> None:
         default_ticker = st.query_params.get("ticker", "AAPL")
         ticker = st.text_input("Ticker", value=default_ticker).upper().strip()
         st.markdown("---")
-        st.markdown("**Good-buy thresholds**")
+        st.markdown("**Good-buy criteria**")
         thresholds = get_thresholds(config)
         st.write(f"Composite ≥ {thresholds['composite_min']}")
-        st.write(f"Upside ≥ {thresholds['implied_upside_min_pct']}%")
+        st.write(f"Implied upside ≥ {thresholds['implied_upside_min_pct']}%")
         st.write(f"Bargain ≥ {thresholds.get('bargain_min', 50)}")
+        if thresholds.get("exclude_sell_consensus"):
+            st.write("Excludes sell-consensus names")
         st.markdown("---")
-        st.markdown("**Factor weights**")
-        for k, v in get_factor_weights(config).items():
-            st.write(f"{FACTOR_LABELS.get(k, k)}: {v:.0%}")
+        st.markdown("**Composite factor weights**")
+        st.caption(
+            "Tuned on historical data (DCA k-fold cross-validation). "
+            "Shown as a share of total; renormalized at runtime over factors with data."
+        )
+        factor_weights = get_factor_weights(config)
+        factor_total = sum(factor_weights.values()) or 1.0
+        for k, v in sorted(factor_weights.items(), key=lambda kv: kv[1], reverse=True):
+            st.write(f"{FACTOR_LABELS.get(k, k)}: {v / factor_total:.1%}")
+        st.markdown("---")
+        st.markdown("**Bargain score weights**")
+        bargain_weights = get_bargain_weights(config)
+        bargain_total = sum(bargain_weights.values()) or 1.0
+        for k, v in sorted(bargain_weights.items(), key=lambda kv: kv[1], reverse=True):
+            st.write(f"{BARGAIN_LABELS.get(k, k)}: {v / bargain_total:.1%}")
 
         snapshot = load_universe_snapshot()
         if snapshot is not None and not snapshot.empty:

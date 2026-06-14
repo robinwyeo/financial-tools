@@ -1,57 +1,36 @@
-# Stock Metrics Tool configuration
-
 universe:
   name: sp500
-  sector_scoring: true  # score vs sector peers when sector has enough names
-
+  sector_scoring: true
 thresholds:
   composite_min: 50.9
   bargain_min: 43.2
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
-
-# Weights are assigned at the THEME level first, then split across the
-# correlated sub-factors within each theme. Theme totals from backtest tuning
-# (2026-06-09 partial run; re-run `python -m backtest.run pipeline` for full history).
 factor_weights:
-  # Value theme — cheapness
-  value: 0.048
-  garp: 0.048
-  graham_value: 0.048
-
-  # Quality theme — profitability & financial soundness
-  quality: 0.0569
-  financial_strength: 0.0569
-  earnings_quality: 0.0569
-  capital_efficiency: 0.0569
-
-  # Trend theme — price momentum (earnings_revisions untuned; no historical analyst data)
-  momentum: 0.0526
+  value: 0.0078
+  garp: 0.0078
+  graham_value: 0.0078
+  quality: 0.0024
+  financial_strength: 0.0024
+  earnings_quality: 0.0024
+  capital_efficiency: 0.0024
+  momentum: 0.2686
   earnings_revisions: 0.07
-
-  # Risk theme — return volatility & drawdowns
-  low_volatility: 0.1542
-  downside_protection: 0.1542
-
-  # Solvency theme — balance-sheet & distress risk
-  balance_sheet_strength: 0.0076
-  distress_risk: 0.0076
-
-  # Capital-allocation theme — cash returns & disciplined investment
-  shareholder_yield: 0.1262
-  investment: 0.1262
-
-# Bargain score component weights (renormalized when data is missing).
+  low_volatility: 0.2061
+  downside_protection: 0.2061
+  balance_sheet_strength: 0.0756
+  distress_risk: 0.0756
+  shareholder_yield: 0.0675
+  investment: 0.0675
 bargain_weights:
   margin_of_safety: 0.6557
   discount_ath: 0.0397
   discount_52w: 0.0315
   rsi_oversold: 0.1231
   analyst_upside: 0.15
-
 email:
   enabled: true
   smtp_host: smtp.gmail.com
   smtp_port: 587
-  from_address: "robinwyeo.stock.alerts@gmail.com"
-  to_address: "robinwyeo.stock.alerts@gmail.com"
+  from_address: robinwyeo.stock.alerts@gmail.com
+  to_address: robinwyeo.stock.alerts@gmail.com

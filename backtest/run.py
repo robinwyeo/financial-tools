@@ -112,14 +112,18 @@ def cmd_apply(args: argparse.Namespace) -> None:
     merged.update(winner_fw)
 
     cfg["factor_weights"] = {k: round(float(v), 4) for k, v in merged.items()}
-    if thresholds:
-        cfg.setdefault("thresholds", {})
-        cfg["thresholds"]["composite_min"] = round(float(thresholds["composite_min"]), 1)
-        cfg["thresholds"]["bargain_min"] = round(float(thresholds["bargain_min"]), 1)
-    if bargain.get("winner_weights"):
-        full_bw = get_bargain_weights(cfg)
-        full_bw.update({k: round(float(v), 4) for k, v in bargain["winner_weights"].items()})
-        cfg["bargain_weights"] = full_bw
+    # The DCA k-fold CV artifact only tunes factor weights; its thresholds and
+    # bargain weights were not recalibrated for the new weights, so we leave the
+    # existing thresholds/bargain weights untouched when applying it.
+    if not use_dca_cv:
+        if thresholds:
+            cfg.setdefault("thresholds", {})
+            cfg["thresholds"]["composite_min"] = round(float(thresholds["composite_min"]), 1)
+            cfg["thresholds"]["bargain_min"] = round(float(thresholds["bargain_min"]), 1)
+        if bargain.get("winner_weights"):
+            full_bw = get_bargain_weights(cfg)
+            full_bw.update({k: round(float(v), 4) for k, v in bargain["winner_weights"].items()})
+            cfg["bargain_weights"] = full_bw
 
     config_path = ROOT / "config.yaml"
     with config_path.open("w", encoding="utf-8") as f:

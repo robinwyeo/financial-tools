@@ -39,7 +39,7 @@ Edit [`config.yaml`](config.yaml):
 
 **Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the daily job.
 
-Default buy rule: `composite >= 50` AND `bargain >= 50` AND `implied_upside >= 15%` AND consensus is not Sell.
+Default buy rule: `composite >= 50.9` AND `bargain >= 43.2` AND `implied_upside >= 15%` AND consensus is not Sell. These thresholds were calibrated by the backtest harness.
 
 ## Email alerts setup
 
@@ -148,23 +148,40 @@ data/           # universe_snapshot.parquet (refreshed by jobs)
 
 ## Historical backtest (weight & threshold tuning)
 
-The `backtest/` package runs a walk-forward simulation on historical S&P 500
-constituents (1996+) using SEC EDGAR point-in-time fundamentals and yfinance
-prices. It tunes composite factor weights, bargain weights, and good-buy
-thresholds against rolling 3-year outperformance vs SPY.
+The `backtest/` package tunes composite factor weights, bargain weights, and
+good-buy thresholds using SEC EDGAR point-in-time fundamentals and yfinance
+prices, covering historical S&P 500 constituents from 2010 to 2026.
+
+**How parameters are set:** factor weights are tuned with a k-fold
+time-series cross-validation that runs the actual DCA strategy — each quarter
+invest $20k equally across the top-5 composite-ranked stocks, hold until the
+end of the fold, and compare ROI on deployed capital against a same-schedule
+SPY DCA. Candidates are ranked by `mean(excess ROI across folds) − std(excess
+ROI)`, so the search explicitly rewards consistency across regimes rather than
+spiking in one period. The winner is only adopted if it is strictly more robust
+than the existing baseline. Good-buy thresholds are calibrated separately by
+bucketing composite/bargain scores against historical forward returns. Bargain
+weights are tuned by maximising the rank IC of the bargain score against
+next-quarter returns.
+
+Current factor weights reflect `sample_134`, the k-fold CV winner from a
+200-candidate search over 5 folds (2010–2026), which beat SPY on 4 of 5 folds
+including the 2023–26 period where the prior baseline lost −14%.
 
 ```bash
 # Full pipeline (slow: hours for complete SEC + price ingest)
-python -m backtest.run pipeline --apply
+python -m backtest.run pipeline
 
 # Individual steps
 python -m backtest.run ingest
 python -m backtest.run build-factors
-python -m backtest.run tune
+python -m backtest.run tune          # rolling win-rate objective (with walk-forward splits)
+python -m backtest.run tune-cv       # DCA k-fold CV objective (recommended)
 python -m backtest.run calibrate
 python -m backtest.run dca
 python -m backtest.run report
-python -m backtest.run apply
+python -m backtest.run apply                  # apply default tune results
+python -m backtest.run apply --use-dca-cv     # apply k-fold CV winner (factor weights only)
 ```
 
 Quick dev run (limited quarters/tickers):

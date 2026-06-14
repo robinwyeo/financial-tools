@@ -13,12 +13,16 @@ from core.config import get_thresholds
 
 def _get_smtp_config(config: dict[str, Any]) -> dict[str, str]:
     email_cfg = config.get("email", {})
+    from_address = os.environ.get("SMTP_FROM") or email_cfg.get("from_address", "")
+    # Gmail requires logging in as the sending account. Prefer FROM over a stale
+    # SMTP_USERNAME secret that may still point at an old mailbox.
+    username = from_address or os.environ.get("SMTP_USERNAME") or ""
     return {
         "host": os.environ.get("SMTP_HOST") or email_cfg.get("smtp_host", "smtp.gmail.com"),
         "port": str(os.environ.get("SMTP_PORT") or email_cfg.get("smtp_port", 587)),
-        "from_address": os.environ.get("SMTP_FROM") or email_cfg.get("from_address", ""),
+        "from_address": from_address,
         "to_address": os.environ.get("SMTP_TO") or email_cfg.get("to_address", ""),
-        "username": os.environ.get("SMTP_USERNAME") or email_cfg.get("from_address", ""),
+        "username": username,
         "password": os.environ.get("SMTP_PASSWORD") or "",
     }
 
@@ -32,7 +36,10 @@ def smtp_config_status(config: dict[str, Any]) -> tuple[bool, str]:
         return False, "missing to address (set SMTP_TO or email.to_address in config.yaml)"
     if not smtp["password"]:
         return False, "missing SMTP password (set SMTP_PASSWORD secret or env var)"
-    return True, f"from={smtp['from_address']} to={smtp['to_address']} host={smtp['host']}"
+    return True, (
+        f"from={smtp['from_address']} to={smtp['to_address']} "
+        f"host={smtp['host']} user={smtp['username']}"
+    )
 
 
 def email_is_enabled(config: dict[str, Any]) -> bool:

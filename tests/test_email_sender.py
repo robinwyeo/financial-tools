@@ -1,6 +1,6 @@
 """Tests for scorecard email formatting."""
 
-from jobs.email_sender import format_scorecard_email
+from jobs.email_sender import _get_smtp_config, format_scorecard_email
 
 
 def _sample_result(ticker: str, *, is_buy: bool, composite: float) -> dict:
@@ -12,6 +12,16 @@ def _sample_result(ticker: str, *, is_buy: bool, composite: float) -> dict:
         "analyst": {"implied_upside_pct": 20.0},
         "is_good_buy": is_buy,
     }
+
+
+def test_smtp_login_uses_from_address_over_stale_username(monkeypatch):
+    monkeypatch.setenv("SMTP_FROM", "alerts@example.com")
+    monkeypatch.setenv("SMTP_USERNAME", "old@example.com")
+    smtp = _get_smtp_config(
+        {"email": {"from_address": "fallback@example.com", "to_address": "to@example.com"}}
+    )
+    assert smtp["from_address"] == "alerts@example.com"
+    assert smtp["username"] == "alerts@example.com"
 
 
 def test_format_scorecard_email_lists_buy_first():

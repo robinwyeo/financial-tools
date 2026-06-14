@@ -23,12 +23,29 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate SMTP secrets
+        env:
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          missing=0
+          for var in SMTP_FROM SMTP_TO SMTP_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error title=Missing secret::${var} is not set in repo Settings → Secrets → Actions"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "SMTP secrets present (from=${SMTP_FROM}, to=${SMTP_TO})"
+
       - name: Run daily watchlist scorecard
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: python jobs/daily_check.py

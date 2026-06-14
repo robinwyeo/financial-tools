@@ -21,7 +21,7 @@ from backtest.factors import build_factor_panel
 from backtest.report import generate_report
 from backtest.simulate_dca import run_dca_validation
 from backtest.thresholds import calibrate_thresholds
-from backtest.tune import tune_bargain_weights, tune_factor_weights
+from backtest.tune import tune_bargain_weights, tune_factor_weights, tune_factor_weights_cv
 from backtest.weights import current_baseline_factor_weights
 from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
 from core.scoring import BARGAIN_COMPONENT_WEIGHTS
@@ -46,6 +46,14 @@ def cmd_build_factors(args: argparse.Namespace) -> None:
 def cmd_tune(args: argparse.Namespace) -> None:
     tune_factor_weights(n_samples=args.n_samples, seed=args.seed)
     tune_bargain_weights(n_samples=args.bargain_samples, seed=args.seed + 1)
+
+
+def cmd_tune_cv(args: argparse.Namespace) -> None:
+    tune_factor_weights_cv(
+        n_samples=args.n_samples,
+        seed=args.seed,
+        k_folds=args.k_folds,
+    )
 
 
 def cmd_calibrate(args: argparse.Namespace) -> None:
@@ -79,13 +87,20 @@ def cmd_apply(args: argparse.Namespace) -> None:
     """Apply tuned weights/thresholds to config.yaml."""
     import yaml
 
-    tuning_path = RESULTS_DIR / "tuning_results.json"
+    use_dca_cv = getattr(args, "use_dca_cv", False)
+    tuning_path = (
+        RESULTS_DIR / "tuning_results_dca_cv.json"
+        if use_dca_cv
+        else RESULTS_DIR / "tuning_results.json"
+    )
     bargain_path = RESULTS_DIR / "bargain_tuning_results.json"
     threshold_path = RESULTS_DIR / "threshold_calibration.json"
 
     if not tuning_path.exists():
-        raise FileNotFoundError("Run tune first to produce tuning_results.json")
+        which = "tune-cv" if use_dca_cv else "tune"
+        raise FileNotFoundError(f"Run {which} first to produce {tuning_path.name}")
 
+    logger.info("Applying factor weights from %s", tuning_path.name)
     tuning = json.loads(tuning_path.read_text(encoding="utf-8"))
     bargain = json.loads(bargain_path.read_text(encoding="utf-8")) if bargain_path.exists() else {}
     thresholds = json.loads(threshold_path.read_text(encoding="utf-8")) if threshold_path.exists() else {}
@@ -132,7 +147,14 @@ def _add_shared_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--n-samples", type=int, default=500, help="Factor weight search samples")
     p.add_argument("--bargain-samples", type=int, default=200, help="Bargain weight search samples")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--k-folds", type=int, default=5, help="Folds for DCA-CV tuning")
     p.add_argument("--apply", action="store_true", help="Write tuned values to config.yaml")
+    p.add_argument(
+        "--use-dca-cv",
+        action="store_true",
+        help="On apply, take factor weights from the DCA k-fold CV winner "
+        "(tuning_results_dca_cv.json) instead of the default tuning_results.json",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("ingest", "Download constituents, EDGAR, prices"),
         ("build-factors", "Build quarterly factor panel"),
         ("tune", "Tune factor and bargain weights"),
+        ("tune-cv", "Tune factor weights on DCA terminal wealth with k-fold CV"),
         ("calibrate", "Calibrate good-buy thresholds"),
         ("dca", "Run DCA validation simulation"),
         ("report", "Generate markdown report"),
@@ -161,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         "ingest": cmd_ingest,
         "build-factors": cmd_build_factors,
         "tune": cmd_tune,
+        "tune-cv": cmd_tune_cv,
         "calibrate": cmd_calibrate,
         "dca": cmd_dca,
         "report": cmd_report,

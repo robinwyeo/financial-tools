@@ -11,19 +11,23 @@ from typing import Any
 from core.config import get_thresholds
 
 
+def _clean(value: str | None) -> str:
+    return (value or "").strip()
+
+
 def _get_smtp_config(config: dict[str, Any]) -> dict[str, str]:
     email_cfg = config.get("email", {})
-    from_address = os.environ.get("SMTP_FROM") or email_cfg.get("from_address", "")
+    from_address = _clean(os.environ.get("SMTP_FROM") or email_cfg.get("from_address", ""))
     # Gmail requires logging in as the sending account. Prefer FROM over a stale
     # SMTP_USERNAME secret that may still point at an old mailbox.
-    username = from_address or os.environ.get("SMTP_USERNAME") or ""
+    username = from_address or _clean(os.environ.get("SMTP_USERNAME"))
     return {
-        "host": os.environ.get("SMTP_HOST") or email_cfg.get("smtp_host", "smtp.gmail.com"),
-        "port": str(os.environ.get("SMTP_PORT") or email_cfg.get("smtp_port", 587)),
+        "host": _clean(os.environ.get("SMTP_HOST")) or email_cfg.get("smtp_host", "smtp.gmail.com"),
+        "port": str(_clean(os.environ.get("SMTP_PORT")) or email_cfg.get("smtp_port", 587)),
         "from_address": from_address,
-        "to_address": os.environ.get("SMTP_TO") or email_cfg.get("to_address", ""),
+        "to_address": _clean(os.environ.get("SMTP_TO") or email_cfg.get("to_address", "")),
         "username": username,
-        "password": os.environ.get("SMTP_PASSWORD") or "",
+        "password": _clean(os.environ.get("SMTP_PASSWORD")).replace(" ", ""),
     }
 
 
@@ -163,6 +167,9 @@ def send_email(subject: str, html_body: str, config: dict[str, Any]) -> tuple[bo
             server.sendmail(smtp["from_address"], [smtp["to_address"]], msg.as_string())
         return True, f"sent to {smtp['to_address']}"
     except smtplib.SMTPAuthenticationError:
-        return False, "SMTP authentication failed (check app password and SMTP_USERNAME)"
+        return False, (
+            f"SMTP authentication failed for {smtp['username']!r} "
+            "(use a Gmail app password for the FROM account; paste without spaces)"
+        )
     except Exception as exc:
         return False, f"SMTP error: {exc}"

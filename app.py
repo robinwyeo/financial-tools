@@ -1432,7 +1432,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
 def render_universe_rankings(config: dict) -> None:
     uni = load_universe_snapshot()
     if uni is None or uni.empty:
-        st.warning("No universe snapshot found. Run the daily job to build one.")
+        st.warning("No universe snapshot found. Run the monthly universe job to build one.")
         return
 
     scored = score_universe(config)

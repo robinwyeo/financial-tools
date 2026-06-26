@@ -1,16 +1,16 @@
-name: Weekly S&P 500 Scorecard
+name: Monthly S&P 500 Scorecard
 
 on:
   schedule:
-    # Mondays 14:00 UTC ≈ 7:00 AM Pacific
-    - cron: "0 14 * * 1"
+    # 1st of each month, 14:00 UTC ≈ 7:00 AM Pacific
+    - cron: "0 14 1 * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  weekly-check:
+  universe-check:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -42,7 +42,7 @@ jobs:
           fi
           echo "SMTP secrets present (from=${SMTP_FROM}, to=${SMTP_TO})"
 
-      - name: Run weekly S&P 500 scorecard
+      - name: Run monthly S&P 500 scorecard
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -56,5 +56,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/universe_snapshot.parquet || true
-          git diff --staged --quiet || git commit -m "chore: refresh universe snapshot (weekly) [skip ci]"
+          git diff --staged --quiet || git commit -m "chore: refresh universe snapshot (monthly) [skip ci]"
           git push || true

@@ -14,6 +14,16 @@ def _sample_result(ticker: str, *, is_buy: bool, composite: float) -> dict:
     }
 
 
+def test_smtp_config_strips_whitespace(monkeypatch):
+    monkeypatch.setenv("SMTP_FROM", " alerts@example.com ")
+    monkeypatch.setenv("SMTP_TO", " to@example.com\n")
+    monkeypatch.setenv("SMTP_PASSWORD", " abcd efgh ijkl mnop ")
+    smtp = _get_smtp_config({"email": {}})
+    assert smtp["from_address"] == "alerts@example.com"
+    assert smtp["to_address"] == "to@example.com"
+    assert smtp["password"] == "abcdefghijklmnop"
+
+
 def test_smtp_login_uses_from_address_over_stale_username(monkeypatch):
     monkeypatch.setenv("SMTP_FROM", "alerts@example.com")
     monkeypatch.setenv("SMTP_USERNAME", "old@example.com")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily job: score watchlist and email morning scorecard (uses existing universe snapshot)."""
+"""Weekly job: score watchlist and email scorecard (uses existing universe snapshot)."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def run_daily(
         subject, body = format_scorecard_email(
             results,
             config,
-            title="Daily Watchlist Scorecard",
+            title="Weekly Watchlist Scorecard",
             subtitle=f"{len(results)} ticker(s) from your watchlist.",
         )
         sent, message = send_email(subject, body, config)
@@ -98,6 +98,7 @@ def run_daily(
             logger.info("Watchlist scorecard email sent (%s)", message)
         else:
             logger.error("Email not sent: %s", message)
+            print(f"::error title=Email delivery failed::{message}")
             return 1
     elif send_report:
         logger.info("Email disabled; set email.enabled or SMTP_PASSWORD in environment")
@@ -106,7 +107,7 @@ def run_daily(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Daily watchlist scorecard email")
+    parser = argparse.ArgumentParser(description="Weekly watchlist scorecard email")
     parser.add_argument(
         "--refresh",
         action="store_true",

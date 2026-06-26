@@ -1,1 +1,1 @@
-"""Daily watchlist check and email alerts."""
+"""Scheduled watchlist and universe scorecard jobs."""

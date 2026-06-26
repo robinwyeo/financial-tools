@@ -1,6 +1,6 @@
 # Stock Metrics & Analyst Aggregation Tool
 
-Empirical factor scoring and aggregated analyst recommendations for stocks, with daily watchlist and weekly S&P 500 scorecard emails.
+Empirical factor scoring and aggregated analyst recommendations for stocks, with weekly watchlist and monthly S&P 500 scorecard emails.
 
 ## Features
 
@@ -9,8 +9,8 @@ Empirical factor scoring and aggregated analyst recommendations for stocks, with
 - **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
 - **Bargain score** — absolute cheapness signal (margin of safety, drawdown, RSI, upside)
 - **ETF view** — basic fund info (no factor scoring)
-- **Daily email** — morning scorecard for your watchlist (composite, bargain, upside, Buy/Not Buy)
-- **Weekly email** — Monday full S&P 500 scorecard
+- **Weekly email** — Monday watchlist scorecard (composite, bargain, upside, Buy/Not Buy)
+- **Monthly email** — full S&P 500 scorecard (1st of each month)
 
 ## Quick start (local)
 
@@ -37,7 +37,7 @@ Edit [`config.yaml`](config.yaml):
 | `factor_weights` | Weight each factor family in composite score |
 | `email` | SMTP settings (or use env vars / GitHub Secrets) |
 
-**Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the daily job.
+**Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the weekly watchlist job.
 
 Default buy rule: `composite >= 50.9` AND `bargain >= 43.2` AND `implied_upside >= 15%` AND consensus is not Sell. These thresholds were calibrated by the backtest harness.
 
@@ -81,10 +81,10 @@ Also set `email.enabled: true` in `config.yaml` (or rely on `SMTP_PASSWORD` bein
 ### 3. Run jobs manually (test first)
 
 ```bash
-# Daily watchlist scorecard (use --no-email to dry-run)
+# Weekly watchlist scorecard (use --no-email to dry-run)
 python jobs/daily_check.py --no-email
 
-# Weekly S&P 500 scorecard (slow — full universe; use --fast --max 50 for dev)
+# Monthly S&P 500 scorecard (slow — full universe; use --fast --max 50 for dev)
 python jobs/weekly_check.py --no-email --fast --max 50
 ```
 
@@ -96,16 +96,16 @@ When ready, omit `--no-email` to send the HTML scorecard to your inbox.
 
 | Workflow | Schedule | What it does |
 |----------|----------|--------------|
-| `.github/workflows/daily.yml` | Every day 14:00 UTC | Watchlist scorecard email |
-| `.github/workflows/weekly.yml` | Mondays 14:00 UTC | Full S&P 500 scorecard email |
+| `.github/workflows/daily.yml` | Mondays 14:00 UTC | Watchlist scorecard email |
+| `.github/workflows/weekly.yml` | 1st of month 14:00 UTC | Full S&P 500 scorecard + snapshot refresh |
 
 Adjust cron times in the workflow files for your timezone (14:00 UTC ≈ 7:00 AM Pacific).
 
 **Local cron (macOS/Linux)** example:
 
 ```cron
-0 7 * * * cd /path/to/financial-tools && .venv/bin/python jobs/daily_check.py
-0 7 * * 1 cd /path/to/financial-tools && .venv/bin/python jobs/weekly_check.py
+0 7 * * 1 cd /path/to/financial-tools && .venv/bin/python jobs/daily_check.py
+0 7 1 * * cd /path/to/financial-tools && .venv/bin/python jobs/weekly_check.py
 ```
 
 Each email includes a table with **Composite**, **Bargain**, **Upside**, and **Buy / Not Buy** for every ticker. Buys are sorted to the top.
@@ -116,17 +116,17 @@ Each email includes a table with **Composite**, **Bargain**, **Upside**, and **B
 
 1. Push repo to GitHub
 2. [share.streamlit.io](https://share.streamlit.io) → New app → select repo, main file `app.py`
-3. Ensure `data/universe_snapshot.parquet` is committed (daily GHA refreshes it)
+3. Ensure `data/universe_snapshot.parquet` is committed (monthly GHA job refreshes it)
 
-## Daily / weekly jobs
+## Scheduled jobs
 
 ```bash
-python jobs/daily_check.py    # watchlist scorecard
-python jobs/weekly_check.py   # full S&P 500 (slow)
+python jobs/daily_check.py    # weekly watchlist scorecard
+python jobs/weekly_check.py   # monthly full S&P 500 (slow)
 ```
 
 Options for both:
-- `--refresh` (daily only) — rebuild universe snapshot first (slow; weekly job does this by default)
+- `--refresh` (watchlist job only) — rebuild universe snapshot first (slow; monthly job does this by default)
 - `--no-email` — skip email
 - `--fast` — smaller fallback universe (faster, good for dev)
 - `--max-universe N` / `--max N` — limit tickers processed
@@ -141,7 +141,7 @@ Options for both:
 core/           # data fetch, factors, scoring, analysts, universe
 app.py          # Streamlit dashboard
 jobs/           # daily_check.py, weekly_check.py, email_sender.py
-watchlist       # your daily watchlist (one ticker per line)
+watchlist       # your watchlist (one ticker per line)
 config.yaml     # thresholds, weights, email
 data/           # universe_snapshot.parquet (refreshed by jobs)
 ```

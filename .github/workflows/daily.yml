@@ -1,16 +1,16 @@
-name: Daily Watchlist Scorecard
+name: Weekly Watchlist Scorecard
 
 on:
   schedule:
-    # 14:00 UTC ≈ 7:00 AM Pacific (adjust if your timezone differs)
-    - cron: "0 14 * * *"
+    # Mondays 14:00 UTC ≈ 7:00 AM Pacific (adjust if your timezone differs)
+    - cron: "0 14 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  daily-check:
+  watchlist-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
           fi
           echo "SMTP secrets present (from=${SMTP_FROM}, to=${SMTP_TO})"
 
-      - name: Run daily watchlist scorecard
+      - name: Run weekly watchlist scorecard
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}

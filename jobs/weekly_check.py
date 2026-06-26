@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekly job: refresh full S&P 500 snapshot and email Monday scorecard."""
+"""Monthly job: refresh full S&P 500 snapshot and email universe scorecard."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def run_weekly(
             logger.warning("Failed to score %s: %s", ticker, exc)
 
     buy_count = sum(1 for r in results if r.get("is_good_buy"))
-    logger.info("Weekly scan complete: %d Buy / %d scored", buy_count, len(results))
+    logger.info("Monthly scan complete: %d Buy / %d scored", buy_count, len(results))
 
     if send_report and email_is_enabled(config):
         ready, status = smtp_config_status(config)
@@ -70,12 +70,12 @@ def run_weekly(
         subject, body = format_scorecard_email(
             results,
             config,
-            title="Weekly S&P 500 Scorecard",
+            title="Monthly S&P 500 Scorecard",
             subtitle=f"Full universe scan — {len(results)} ticker(s). Buys listed first.",
         )
         sent, message = send_email(subject, body, config)
         if sent:
-            logger.info("Weekly scorecard email sent (%s)", message)
+            logger.info("Monthly scorecard email sent (%s)", message)
         else:
             logger.error("Email not sent: %s", message)
             return 1
@@ -86,7 +86,7 @@ def run_weekly(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Weekly S&P 500 scorecard email")
+    parser = argparse.ArgumentParser(description="Monthly S&P 500 scorecard email")
     parser.add_argument("--no-refresh", action="store_true", help="Skip universe refresh")
     parser.add_argument(
         "--max",

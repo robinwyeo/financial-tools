@@ -22,7 +22,7 @@ Goal: run the Streamlit dashboard on a free host, then surface it as a post on t
 
 ### Secrets / config (only if needed)
 - [ ] The **dashboard itself needs no secrets**. The email/SMTP settings in `config.yaml`
-      and the daily alert job are for the GitHub Actions workflow, not the public app.
+      and the scheduled scorecard jobs are for GitHub Actions, not the public app.
 - [ ] If you later want secrets in the app, add them under the app's **Settings → Secrets**
       on Streamlit Cloud (never commit credentials).
 
@@ -63,6 +63,6 @@ The post file is already scaffolded at:
 - **iframe height/mobile:** the embed is a fixed 900px tall. If it feels cramped, adjust the
   `height` in the iframe `style`, or lean on the "open in new tab" link as the primary CTA.
 - **Data freshness:** `yfinance` is a free, occasionally-flaky source. To keep universe ranks
-  fresh, the existing `.github/workflows/daily.yml` job rebuilds the snapshot; make sure that
-  workflow is enabled on the GitHub repo if you want daily refreshes.
+  fresh, the `.github/workflows/weekly.yml` job rebuilds the snapshot monthly; make sure that
+  workflow is enabled on the GitHub repo if you want automatic refreshes.
 - **No investment advice:** the post includes a disclaimer — keep it.

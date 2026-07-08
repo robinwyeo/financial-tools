@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
+from core.factors import FACTOR_SCORE_COLUMNS
 from core.data import fetch_etf_holdings, fetch_etf_info, fetch_price_history, is_etf
 from core.scoring import score_ticker, score_universe
 from core.universe import load_universe_snapshot
@@ -1418,19 +1419,21 @@ def main() -> None:
         st.markdown("---")
         st.markdown("**Composite factor weights**")
         st.caption(
-            "Tuned on historical data (DCA k-fold cross-validation). "
-            "Shown as a share of total; renormalized at runtime over factors with data."
+            "Eight factor groups (DCA k-fold CV tuned). "
+            "Shown as a share of total; renormalized at runtime over groups with data."
         )
         factor_weights = get_factor_weights(config)
         factor_total = sum(factor_weights.values()) or 1.0
-        for k, v in sorted(factor_weights.items(), key=lambda kv: kv[1], reverse=True):
-            st.write(f"{FACTOR_LABELS.get(k, k)}: {v / factor_total:.1%}")
+        for family in sorted(FACTOR_SCORE_COLUMNS, key=lambda f: factor_weights.get(f, 0.0), reverse=True):
+            weight = factor_weights.get(family, 0.0)
+            st.write(f"{FACTOR_LABELS.get(family, family)}: {weight / factor_total:.1%}")
         st.markdown("---")
         st.markdown("**Bargain score weights**")
         bargain_weights = get_bargain_weights(config)
         bargain_total = sum(bargain_weights.values()) or 1.0
-        for k, v in sorted(bargain_weights.items(), key=lambda kv: kv[1], reverse=True):
-            st.write(f"{BARGAIN_LABELS.get(k, k)}: {v / bargain_total:.1%}")
+        for key in sorted(bargain_weights, key=lambda k: bargain_weights.get(k, 0.0), reverse=True):
+            weight = bargain_weights[key]
+            st.write(f"{BARGAIN_LABELS.get(key, key)}: {weight / bargain_total:.1%}")
 
         snapshot = load_universe_snapshot()
         if snapshot is not None and not snapshot.empty:

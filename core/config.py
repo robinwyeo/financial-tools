@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from core.factors import FACTOR_SCORE_COLUMNS
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = ROOT / "config.yaml"
 
@@ -21,22 +23,25 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
 # 8 orthogonal groups replace the old 15 collinear families.
 # earnings_revisions is live-only (excluded from backtest tuning; kept at 0.05).
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "value": 0.0301,
-    "garp": 0.4348,
-    "quality": 0.1097,
-    "balance_sheet": 0.1437,
-    "momentum": 0.0724,
-    "low_volatility": 0.1390,
-    "capital_discipline": 0.0703,
+    "value": 0.0286,
+    "garp": 0.4131,
+    "quality": 0.1042,
+    "balance_sheet": 0.1365,
+    "momentum": 0.0688,
+    "low_volatility": 0.1321,
+    "capital_discipline": 0.0667,
     "earnings_revisions": 0.0500,
 }
 
 
 def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
-    """Return factor weights from config, falling back to defaults for any missing key."""
+    """Return factor-group weights from config for the 8 composite groups only."""
     cfg = config or load_config()
     weights = cfg.get("factor_weights", {})
-    return {family: float(weights.get(family, default)) for family, default in _DEFAULT_WEIGHTS.items()}
+    return {
+        family: float(weights.get(family, _DEFAULT_WEIGHTS.get(family, 0.0)))
+        for family in FACTOR_SCORE_COLUMNS
+    }
 
 
 # Bargain component defaults from historical IC tuning (correct forward-return alignment).
@@ -48,12 +53,17 @@ _DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
     "rsi_oversold": 0.7488,
 }
 
+_BARGAIN_COMPONENT_KEYS: tuple[str, ...] = tuple(_DEFAULT_BARGAIN_WEIGHTS.keys())
+
 
 def get_bargain_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
-    """Return bargain component weights from config, falling back to defaults."""
+    """Return bargain component weights from config for the three active components only."""
     cfg = config or load_config()
     weights = cfg.get("bargain_weights", {})
-    return {key: float(weights.get(key, default)) for key, default in _DEFAULT_BARGAIN_WEIGHTS.items()}
+    return {
+        key: float(weights.get(key, _DEFAULT_BARGAIN_WEIGHTS.get(key, 0.0)))
+        for key in _BARGAIN_COMPONENT_KEYS
+    }
 
 
 def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:

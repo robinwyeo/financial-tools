@@ -2,32 +2,23 @@ universe:
   name: sp500
   sector_scoring: true
 thresholds:
-  composite_min: 50.9
-  bargain_min: 43.2
+  composite_min: 51.3
+  bargain_min: 49.3
   implied_upside_min_pct: 15
   exclude_sell_consensus: true
 factor_weights:
-  value: 0.0078
-  garp: 0.0078
-  graham_value: 0.0078
-  quality: 0.0024
-  financial_strength: 0.0024
-  earnings_quality: 0.0024
-  capital_efficiency: 0.0024
-  momentum: 0.2686
-  earnings_revisions: 0.07
-  low_volatility: 0.2061
-  downside_protection: 0.2061
-  balance_sheet_strength: 0.0756
-  distress_risk: 0.0756
-  shareholder_yield: 0.0675
-  investment: 0.0675
+  value: 0.0286
+  garp: 0.4131
+  quality: 0.1042
+  balance_sheet: 0.1365
+  momentum: 0.0688
+  low_volatility: 0.1321
+  capital_discipline: 0.0667
+  earnings_revisions: 0.05
 bargain_weights:
-  margin_of_safety: 0.6557
-  discount_ath: 0.0397
-  discount_52w: 0.0315
-  rsi_oversold: 0.1231
-  analyst_upside: 0.15
+  margin_of_safety: 0.2489
+  discount_52w: 0.0024
+  rsi_oversold: 0.7487
 email:
   enabled: true
   smtp_host: smtp.gmail.com

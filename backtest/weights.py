@@ -8,7 +8,6 @@ from backtest.constants import (
     BACKTEST_FACTOR_FAMILIES,
     DEFAULT_BARGAIN_WEIGHTS,
     EXCLUDED_COMPOSITE_FACTORS,
-    EXCLUDED_BARGAIN_COMPONENTS,
     FACTOR_THEMES,
     WITHIN_THEME_PROPORTIONS,
 )
@@ -17,7 +16,11 @@ from core.scoring import BARGAIN_COMPONENT_WEIGHTS
 
 
 def theme_weights_to_factor_weights(theme_weights: dict[str, float]) -> dict[str, float]:
-    """Expand theme-level weights into per-factor weights using fixed within-theme splits."""
+    """Expand theme-level weights into per-factor weights.
+
+    Since themes and factor groups are now 1:1, this is simply a pass-through
+    that normalises within-theme proportions (all equal to 1.0).
+    """
     out: dict[str, float] = {}
     for theme, factors in FACTOR_THEMES.items():
         theme_w = float(theme_weights.get(theme, 0.0))
@@ -31,7 +34,7 @@ def theme_weights_to_factor_weights(theme_weights: dict[str, float]) -> dict[str
 
 
 def normalize_backtest_weights(weights: dict[str, float]) -> dict[str, float]:
-    """Keep only reconstructable factors; renormalize to sum to original total mass."""
+    """Keep only reconstructable factor groups; renormalize to the backtestable mass."""
     cfg = load_config()
     full = get_factor_weights(cfg)
     excluded_mass = sum(full.get(f, 0.0) for f in EXCLUDED_COMPOSITE_FACTORS)
@@ -57,21 +60,12 @@ def random_theme_weights(rng: np.random.Generator) -> dict[str, float]:
 
 
 def normalize_bargain_weights(weights: dict[str, float]) -> dict[str, float]:
-    kept = {
-        k: float(weights.get(k, 0.0))
-        for k in DEFAULT_BARGAIN_WEIGHTS
-        if k not in EXCLUDED_BARGAIN_COMPONENTS
-    }
+    """Renormalize bargain weights over the three kept components."""
+    kept = {k: float(weights.get(k, 0.0)) for k in DEFAULT_BARGAIN_WEIGHTS}
     total = sum(kept.values())
     if total <= 0:
         return dict(DEFAULT_BARGAIN_WEIGHTS)
-    full_total = sum(
-        BARGAIN_COMPONENT_WEIGHTS.get(k, 0.0)
-        for k in BARGAIN_COMPONENT_WEIGHTS
-        if k not in EXCLUDED_BARGAIN_COMPONENTS
-    )
-    scale = full_total / total
-    return {k: v * scale for k, v in kept.items()}
+    return {k: v / total for k, v in kept.items()}
 
 
 def current_baseline_bargain_weights() -> dict[str, float]:

@@ -56,17 +56,27 @@ def _score_panel_quarter(
     quarter_df: pd.DataFrame,
     factor_weights: dict[str, float],
 ) -> pd.DataFrame:
-    """Score one quarter cross-sectionally (universe-wide)."""
+    """Score one quarter cross-sectionally (universe-wide).
+
+    Mirrors core.scoring.score_universe_df: for each group, rank each
+    sub-signal, then average available sub-signal percentiles into a single
+    group percentile score. No sector adjustment in the backtest.
+    """
     result = quarter_df.copy()
     weights = normalize_backtest_weights(factor_weights)
 
     for family in BACKTEST_FACTOR_FAMILIES:
-        col = FACTOR_SCORE_COLUMNS[family]
-        if col not in result.columns:
+        cols = FACTOR_SCORE_COLUMNS.get(family, [])
+        sub_series: list[pd.Series] = []
+        for col in cols:
+            if col not in result.columns:
+                continue
+            z = cross_sectional_zscore(winsorize(result[col]))
+            sub_series.append(z.apply(zscore_to_percentile))
+        if sub_series:
+            result[f"pct_{family}"] = pd.concat(sub_series, axis=1).mean(axis=1, skipna=True)
+        else:
             result[f"pct_{family}"] = np.nan
-            continue
-        z = cross_sectional_zscore(winsorize(result[col]))
-        result[f"pct_{family}"] = z.apply(zscore_to_percentile)
 
     composites = []
     for _, row in result.iterrows():
@@ -357,9 +367,12 @@ def _compute_ic(scored: pd.DataFrame, forward_returns: pd.DataFrame) -> float:
         merged = q_df.merge(fwd, on="ticker", how="inner")
         if len(merged) < 10:
             continue
-        ic = merged["composite"].corr(merged["fwd_return"], method="spearman")
-        if ic is not None and not np.isnan(ic):
-            ics.append(float(ic))
+        # Manual Spearman (rank + Pearson) — avoids scipy dependency.
+        a = merged["composite"].rank()
+        b = merged["fwd_return"].rank()
+        ic = float(np.corrcoef(a, b)[0, 1])
+        if not np.isnan(ic):
+            ics.append(ic)
     return float(np.mean(ics)) if ics else 0.0
 
 

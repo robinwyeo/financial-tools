@@ -14,12 +14,12 @@ from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
 from core.watchlist import load_watchlist
 
+# Default bargain component weights from historical IC tuning.
+# RSI oversold dominates (mean-reversion); discount_ath and analyst_upside removed.
 BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.30,
-    "discount_ath": 0.25,
-    "discount_52w": 0.15,
-    "rsi_oversold": 0.15,
-    "analyst_upside": 0.15,
+    "margin_of_safety": 0.2489,
+    "discount_52w": 0.0024,
+    "rsi_oversold": 0.7488,
 }
 
 
@@ -42,23 +42,27 @@ def compute_bargain_score(
 ) -> dict[str, Any]:
     """
     Absolute 0-100 bargain score from fixed thresholds (higher = more of a bargain).
+
+    Components:
+      margin_of_safety  — Graham ratio scored over [0.30, 1.30]; discriminates
+                          across the full S&P 500 distribution (median ~0.47).
+      discount_52w      — % below 52-week high; linear 0%→0, 30%→100.
+      rsi_oversold      — RSI 70→0, RSI 30→100 (linear(70-RSI, 0, 40)).
+
     Renormalizes weights over components with available data.
+    analyst_upside and discount_ath are intentionally excluded: upside is a
+    standalone good-buy gate; ATH discount is 0.95-correlated with 52w discount.
     """
     components: dict[str, float | None] = {
         "margin_of_safety": None,
-        "discount_ath": None,
         "discount_52w": None,
         "rsi_oversold": None,
-        "analyst_upside": None,
     }
 
     if graham_ratio is not None and graham_ratio > 0:
-        mos = graham_ratio - 1.0
-        components["margin_of_safety"] = _linear_score(mos, 0.0, 0.50)
-
-    if price is not None and all_time_high is not None and all_time_high > 0 and price > 0:
-        discount_ath = 1.0 - (price / all_time_high)
-        components["discount_ath"] = _linear_score(discount_ath, 0.0, 0.50)
+        # Spans [0.30, 1.30]: covers the full S&P 500 distribution without
+        # clamping 90%+ of stocks to zero as the old (graham_ratio - 1) did.
+        components["margin_of_safety"] = _linear_score(graham_ratio, 0.30, 1.30)
 
     if (
         price is not None
@@ -71,9 +75,6 @@ def compute_bargain_score(
 
     if rsi_14 is not None:
         components["rsi_oversold"] = _linear_score(70.0 - float(rsi_14), 0.0, 40.0)
-
-    if implied_upside_pct is not None:
-        components["analyst_upside"] = _linear_score(float(implied_upside_pct), 0.0, 40.0)
 
     weights = component_weights or BARGAIN_COMPONENT_WEIGHTS
     weighted_sum = 0.0
@@ -173,7 +174,7 @@ def _composite_and_coverage(
     row: pd.Series,
     weights: dict[str, float],
 ) -> tuple[float | None, float]:
-    """Weighted composite using only factors with data; returns (composite, coverage_pct)."""
+    """Weighted composite using only groups with data; returns (composite, coverage_pct)."""
     weighted_sum = 0.0
     weight_available = 0.0
     weight_total = sum(weights.get(family, 0) for family in FACTOR_SCORE_COLUMNS)
@@ -254,7 +255,11 @@ def score_universe_df(
 ) -> pd.DataFrame:
     """
     Score all tickers in a factors dataframe cross-sectionally.
-    Returns dataframe with z-scores, percentiles, and composite.
+
+    For each factor group: cross-sectionally rank each sub-signal (winsorize →
+    sector z-score → normal-CDF percentile), then average available sub-signal
+    percentiles into a single group percentile score. Composite = weighted average
+    of group scores over groups with data.
     """
     cfg = config or load_config()
     weights = get_factor_weights(cfg)
@@ -262,21 +267,23 @@ def score_universe_df(
 
     result = factors_df.copy()
 
-    for family, col in FACTOR_SCORE_COLUMNS.items():
-        if col not in result.columns:
-            result[f"z_{family}"] = np.nan
-            result[f"pct_{family}"] = np.nan
-            continue
-
-        z_col = f"z_{family}"
+    for family, cols in FACTOR_SCORE_COLUMNS.items():
         pct_col = f"pct_{family}"
+        sub_series: list[pd.Series] = []
 
-        if use_sector:
-            result[z_col] = _score_column(result, col, group_col)
+        for col in cols:
+            if col not in result.columns:
+                continue
+            if use_sector:
+                z = _score_column(result, col, group_col)
+            else:
+                z = cross_sectional_zscore(winsorize(result[col]))
+            sub_series.append(z.apply(zscore_to_percentile))
+
+        if sub_series:
+            result[pct_col] = pd.concat(sub_series, axis=1).mean(axis=1, skipna=True)
         else:
-            result[z_col] = cross_sectional_zscore(winsorize(result[col]))
-
-        result[pct_col] = result[z_col].apply(zscore_to_percentile)
+            result[pct_col] = np.nan
 
     composites = []
     coverages = []
@@ -311,7 +318,6 @@ def score_ticker(
 
     uni = universe_df if universe_df is not None else load_universe_snapshot()
     if uni is None or uni.empty:
-        # Fallback: score without cross-section (raw percentiles unavailable)
         return _score_without_universe(ticker, raw, factors, analyst, cfg)
 
     # Build row for this ticker; merge with snapshot so partial live fetches do not wipe factors.
@@ -347,16 +353,15 @@ def score_ticker(
         bargain_score=bargain_score,
     )
 
-    factor_breakdown = {}
+    factor_breakdown: dict[str, dict] = {}
     for family in FACTOR_SCORE_COLUMNS:
-        col = FACTOR_SCORE_COLUMNS[family]
         factor_breakdown[family] = {
-            "raw": row.get(col),
             "percentile": scored_row.get(f"pct_{family}"),
-            "z_score": scored_row.get(f"z_{family}"),
         }
 
-    factors_raw = {col: row.get(col) for col in FACTOR_SCORE_COLUMNS.values()}
+    # Flatten all sub-signal columns for the raw values expander
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
+    factors_raw = {col: row.get(col) for col in all_sub_cols}
     factors_raw["trailing_pe"] = raw.get("trailing_pe")
 
     return {
@@ -400,9 +405,10 @@ def _score_without_universe(
 ) -> dict[str, Any]:
     """Fallback when no universe snapshot exists."""
     factor_breakdown = {
-        family: {"raw": factors.get(col), "percentile": None, "z_score": None}
-        for family, col in FACTOR_SCORE_COLUMNS.items()
+        family: {"percentile": None}
+        for family in FACTOR_SCORE_COLUMNS
     }
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
     return {
         "ticker": ticker,
         "name": raw.get("name"),
@@ -418,7 +424,7 @@ def _score_without_universe(
         "composite": None,
         "factor_coverage_pct": 0.0,
         "factor_breakdown": factor_breakdown,
-        "factors_raw": {**factors, "trailing_pe": raw.get("trailing_pe")},
+        "factors_raw": {**{col: factors.get(col) for col in all_sub_cols}, "trailing_pe": raw.get("trailing_pe")},
         "analyst": analyst,
         "is_good_buy": False,
         "data_warnings": raw.get("data_warnings", []),

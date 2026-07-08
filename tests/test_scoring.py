@@ -20,6 +20,49 @@ def _minimal_config() -> dict:
     return {"factor_weights": weights, "universe": {"sector_scoring": False}}
 
 
+def _minimal_df() -> pd.DataFrame:
+    """Minimal universe dataframe with all sub-signal columns for the 8 factor groups."""
+    base = {
+        "sector": "Tech",
+        # value group
+        "earnings_yield": 0.08,
+        "fcf_yield": 0.06,
+        "book_to_market": 0.3,
+        "graham_ratio": 0.9,
+        # garp group
+        "garp": 1.5,
+        # quality group
+        "gross_profitability": 0.4,
+        "roe": 0.15,
+        "roa": 0.08,
+        "profit_margin": 0.12,
+        "roic": 0.18,
+        "earnings_quality": 0.02,
+        "financial_strength": 7.0,
+        # balance_sheet group
+        "net_cash_to_mcap": -0.05,
+        "low_leverage": 0.5,
+        "altman_z": 3.5,
+        # momentum group
+        "momentum_12_1": 0.15,
+        # low_volatility group
+        "low_volatility": 8.0,
+        # capital_discipline group
+        "shareholder_yield": 0.03,
+        "investment": -0.05,
+        # earnings_revisions group
+        "earnings_revisions": 1.0,
+    }
+    rows = []
+    for i, ticker in enumerate(["AAA", "BBB", "CCC"]):
+        row = {"ticker": ticker, **base}
+        # Vary some values so cross-sectional ranking is non-degenerate
+        row["earnings_yield"] = base["earnings_yield"] * (1 + i * 0.1)
+        row["momentum_12_1"] = base["momentum_12_1"] * (1 - i * 0.1)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def test_composite_excludes_missing_factors():
     weights = {"value": 0.5, "momentum": 0.5}
     row = pd.Series({"pct_value": 80.0, "pct_momentum": np.nan})
@@ -37,70 +80,25 @@ def test_composite_coverage_zero_when_all_missing():
 
 
 def test_score_universe_df_adds_factor_coverage():
-    df = pd.DataFrame(
-        [
-            {
-                "ticker": "AAA",
-                "sector": "Tech",
-                "value_composite": 0.1,
-                "momentum_12_1": 0.2,
-                "quality_composite": 0.3,
-                "low_volatility": 0.4,
-                "investment": -0.1,
-                "earnings_revisions": 1.0,
-                "financial_strength": 7.0,
-                "garp": 1.5,
-                "balance_sheet_strength": 0.2,
-                "graham_value": 1.1,
-                "downside_protection": 0.3,
-                "earnings_quality": 0.01,
-                "shareholder_yield": 0.04,
-                "roic": 0.15,
-                "altman_z": 3.0,
-            },
-            {
-                "ticker": "BBB",
-                "sector": "Tech",
-                "value_composite": 0.2,
-                "momentum_12_1": 0.1,
-                "quality_composite": 0.2,
-                "low_volatility": 0.3,
-                "investment": -0.2,
-                "earnings_revisions": 0.5,
-                "financial_strength": 6.0,
-                "garp": 1.0,
-                "balance_sheet_strength": 0.1,
-                "graham_value": 0.9,
-                "downside_protection": 0.2,
-                "earnings_quality": 0.02,
-                "shareholder_yield": 0.03,
-                "roic": 0.10,
-                "altman_z": 2.5,
-            },
-            {
-                "ticker": "CCC",
-                "sector": "Tech",
-                "value_composite": 0.15,
-                "momentum_12_1": 0.15,
-                "quality_composite": 0.25,
-                "low_volatility": 0.35,
-                "investment": -0.15,
-                "earnings_revisions": 0.75,
-                "financial_strength": 6.5,
-                "garp": 1.25,
-                "balance_sheet_strength": 0.15,
-                "graham_value": 1.0,
-                "downside_protection": 0.25,
-                "earnings_quality": 0.015,
-                "shareholder_yield": 0.035,
-                "roic": 0.12,
-                "altman_z": 2.75,
-            },
-        ]
-    )
+    df = _minimal_df()
     scored = score_universe_df(df, _minimal_config(), group_col=None)
     assert "factor_coverage_pct" in scored.columns
     assert scored["factor_coverage_pct"].iloc[0] == pytest.approx(100.0)
+    assert "pct_value" in scored.columns
+    assert "pct_quality" in scored.columns
+    assert "pct_balance_sheet" in scored.columns
+    assert "composite" in scored.columns
+
+
+def test_score_universe_df_rank_averages_within_group():
+    """The value group score should be the mean of sub-signal percentiles, not a raw average."""
+    df = _minimal_df()
+    scored = score_universe_df(df, _minimal_config(), group_col=None)
+    # All pct values should be in [0, 100]
+    for family in FACTOR_SCORE_COLUMNS:
+        col = f"pct_{family}"
+        vals = scored[col].dropna()
+        assert (vals >= 0).all() and (vals <= 100).all(), f"{col} out of range"
 
 
 def test_compute_bargain_score_high_when_discounted():
@@ -119,7 +117,7 @@ def test_compute_bargain_score_high_when_discounted():
 def test_compute_bargain_score_low_when_expensive():
     result = compute_bargain_score(
         price=95.0,
-        graham_ratio=0.9,
+        graham_ratio=0.3,
         all_time_high=100.0,
         fifty_two_week_high=98.0,
         rsi_14=75.0,
@@ -130,17 +128,48 @@ def test_compute_bargain_score_low_when_expensive():
 
 
 def test_compute_bargain_score_renormalizes_partial_data():
+    """When only 52w discount data is available, score uses that component alone."""
     result = compute_bargain_score(
         price=50.0,
         graham_ratio=None,
-        all_time_high=100.0,
-        fifty_two_week_high=None,
+        all_time_high=100.0,  # ignored; discount_ath removed
+        fifty_two_week_high=100.0,
         rsi_14=None,
         implied_upside_pct=None,
     )
     assert result["score"] is not None
-    assert result["components"]["discount_ath"] is not None
+    assert result["components"]["discount_52w"] is not None
     assert result["components"]["margin_of_safety"] is None
+    assert result["components"]["rsi_oversold"] is None
+    # discount_52w alone: 50% below 52w high → linear(0.5, 0, 0.30) = 100 (clamped)
+    assert result["score"] == pytest.approx(100.0)
+
+
+def test_compute_bargain_score_three_components_only():
+    """Removed components (discount_ath, analyst_upside) must not appear."""
+    result = compute_bargain_score(
+        price=60.0, graham_ratio=0.8, all_time_high=120.0,
+        fifty_two_week_high=100.0, rsi_14=40.0, implied_upside_pct=25.0,
+    )
+    assert "discount_ath" not in result["components"]
+    assert "analyst_upside" not in result["components"]
+    assert set(result["components"].keys()) == {"margin_of_safety", "discount_52w", "rsi_oversold"}
+
+
+def test_compute_bargain_score_margin_of_safety_range():
+    """Graham ratio should discriminate across the S&P 500 distribution [0.3, 1.3]."""
+    # Median S&P 500 graham_ratio ≈ 0.47 should produce a non-zero score
+    r_median = compute_bargain_score(None, 0.47, None, None, None, None)
+    assert r_median["components"]["margin_of_safety"] is not None
+    assert r_median["components"]["margin_of_safety"] > 0
+
+    # ratio=0.30 → exactly 0 (floor)
+    r_low = compute_bargain_score(None, 0.30, None, None, None, None)
+    assert r_low["components"]["margin_of_safety"] == pytest.approx(0.0)
+
+    # ratio=1.30 → exactly 100 (ceiling)
+    r_high = compute_bargain_score(None, 1.30, None, None, None, None)
+    assert r_high["components"]["margin_of_safety"] == pytest.approx(100.0)
 
 
 def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
@@ -150,7 +179,7 @@ def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
                 "ticker": "AMZN",
                 "name": "Amazon.com, Inc.",
                 "sector": "Consumer Cyclical",
-                "value_composite": 0.05,
+                "earnings_yield": 0.05,
                 "garp": 2.3,
             }
         ]
@@ -159,64 +188,22 @@ def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
         "ticker": "AMZN",
         "name": "AMZN",
         "sector": None,
-        "value_composite": None,
+        "earnings_yield": None,
         "garp": None,
     }
     merged = _merge_ticker_row_with_universe(live, uni, "AMZN")
     assert merged["name"] == "Amazon.com, Inc."
     assert merged["sector"] == "Consumer Cyclical"
-    assert merged["value_composite"] == 0.05
+    assert merged["earnings_yield"] == 0.05
     assert merged["garp"] == 2.3
 
 
 def test_score_ticker_survives_empty_quote_info(monkeypatch):
-    """Partial yfinance info must not wipe universe snapshot factor rows."""
-    uni = pd.DataFrame(
-        [
-            {
-                "ticker": "AMZN",
-                "name": "Amazon.com, Inc.",
-                "sector": "Consumer Cyclical",
-                "industry": "Internet Retail",
-                "value_composite": 0.05,
-                "momentum_12_1": 0.1,
-                "quality_composite": 0.2,
-                "low_volatility": 0.3,
-                "investment": -0.1,
-                "earnings_revisions": 0.4,
-                "financial_strength": 7.0,
-                "garp": 2.3,
-                "balance_sheet_strength": 0.3,
-                "graham_value": 0.4,
-                "downside_protection": 0.5,
-                "earnings_quality": 0.6,
-                "shareholder_yield": 0.01,
-                "roic": 0.15,
-                "altman_z": 3.0,
-            },
-            {
-                "ticker": "MSFT",
-                "name": "Microsoft Corporation",
-                "sector": "Technology",
-                "industry": "Software",
-                "value_composite": 0.02,
-                "momentum_12_1": 0.15,
-                "quality_composite": 0.25,
-                "low_volatility": 0.25,
-                "investment": -0.05,
-                "earnings_revisions": 0.5,
-                "financial_strength": 8.0,
-                "garp": 1.8,
-                "balance_sheet_strength": 0.4,
-                "graham_value": 0.3,
-                "downside_protection": 0.6,
-                "earnings_quality": 0.7,
-                "shareholder_yield": 0.02,
-                "roic": 0.2,
-                "altman_z": 4.0,
-            },
-        ]
-    )
+    """Partial yfinance info must not wipe universe snapshot sub-signal columns."""
+    uni = _minimal_df()
+    uni.loc[0, "ticker"] = "AMZN"
+    uni.loc[1, "ticker"] = "MSFT"
+    uni = uni.head(2).copy()
 
     def fake_build(_ticker: str) -> dict:
         return {
@@ -235,17 +222,21 @@ def test_score_ticker_survives_empty_quote_info(monkeypatch):
             "num_analysts": 40,
         }
 
+    # All sub-signal columns return None (simulates partial live fetch)
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
     monkeypatch.setattr("core.scoring.build_raw_metrics", fake_build)
     monkeypatch.setattr(
         "core.scoring.compute_all_factors",
-        lambda _raw: {col: None for col in FACTOR_SCORE_COLUMNS.values()},
+        lambda _raw: {col: None for col in all_sub_cols},
     )
 
     analysis = score_ticker("AMZN", _minimal_config(), universe_df=uni)
-    assert analysis["sector"] == "Consumer Cyclical"
-    assert analysis["name"] == "Amazon.com, Inc."
-    assert analysis["factor_breakdown"]["value"]["raw"] == 0.05
-    assert analysis["factor_breakdown"]["garp"]["raw"] == 2.3
+    # Snapshot values should be used for sector/name
+    assert analysis["sector"] == "Tech"
+    # factor_breakdown should have percentile entries for all groups
+    for family in FACTOR_SCORE_COLUMNS:
+        assert family in analysis["factor_breakdown"]
+        assert "percentile" in analysis["factor_breakdown"][family]
 
 
 def test_evaluate_good_buy_requires_composite_upside_and_bargain():

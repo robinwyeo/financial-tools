@@ -18,65 +18,57 @@ BACKTEST_END = date(2026, 3, 31)
 TRAIN_END = date(2018, 12, 31)
 VALID_END = date(2022, 12, 31)
 
-# Factors reconstructable without historical analyst data.
+# Factor groups reconstructable without historical analyst data (7 of the 8 groups).
 BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
     "value",
     "garp",
-    "graham_value",
     "quality",
-    "financial_strength",
-    "earnings_quality",
-    "capital_efficiency",
+    "balance_sheet",
     "momentum",
     "low_volatility",
-    "downside_protection",
-    "balance_sheet_strength",
-    "distress_risk",
-    "shareholder_yield",
-    "investment",
+    "capital_discipline",
 )
 
-# Excluded from historical reconstruction (no free analyst history).
+# earnings_revisions requires live analyst rec history; excluded from historical tuning.
 EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset({"earnings_revisions"})
 
+# All three bargain components are reconstructable from EDGAR + price data.
 BARGAIN_BACKTEST_COMPONENTS: tuple[str, ...] = (
     "margin_of_safety",
-    "discount_ath",
     "discount_52w",
     "rsi_oversold",
 )
 
-EXCLUDED_BARGAIN_COMPONENTS: frozenset[str] = frozenset({"analyst_upside"})
+# No backtest bargain components are excluded (discount_ath and analyst_upside
+# were permanently removed from the bargain score, not merely excluded for backtest).
+EXCLUDED_BARGAIN_COMPONENTS: frozenset[str] = frozenset()
 
+# Themes = factor groups (1:1 mapping; tuning samples a Dirichlet over these).
 FACTOR_THEMES: dict[str, list[str]] = {
-    "value": ["value", "garp", "graham_value"],
-    "quality": ["quality", "financial_strength", "earnings_quality", "capital_efficiency"],
-    "trend": ["momentum"],
-    "risk": ["low_volatility", "downside_protection"],
-    "solvency": ["balance_sheet_strength", "distress_risk"],
-    "capital_allocation": ["shareholder_yield", "investment"],
+    "value": ["value"],
+    "garp": ["garp"],
+    "quality": ["quality"],
+    "balance_sheet": ["balance_sheet"],
+    "momentum": ["momentum"],
+    "low_volatility": ["low_volatility"],
+    "capital_discipline": ["capital_discipline"],
 }
 
-# Within-theme proportions from config.yaml (used when scaling theme weights).
+# Within-theme proportions: trivial (each theme has exactly one factor group).
 WITHIN_THEME_PROPORTIONS: dict[str, dict[str, float]] = {
-    "value": {"value": 0.07, "garp": 0.07, "graham_value": 0.07},
-    "quality": {
-        "quality": 0.06,
-        "financial_strength": 0.06,
-        "earnings_quality": 0.06,
-        "capital_efficiency": 0.06,
-    },
-    "trend": {"momentum": 0.08},
-    "risk": {"low_volatility": 0.05, "downside_protection": 0.05},
-    "solvency": {"balance_sheet_strength": 0.05, "distress_risk": 0.05},
-    "capital_allocation": {"shareholder_yield": 0.10, "investment": 0.10},
+    "value": {"value": 1.0},
+    "garp": {"garp": 1.0},
+    "quality": {"quality": 1.0},
+    "balance_sheet": {"balance_sheet": 1.0},
+    "momentum": {"momentum": 1.0},
+    "low_volatility": {"low_volatility": 1.0},
+    "capital_discipline": {"capital_discipline": 1.0},
 }
 
 DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.30,
-    "discount_ath": 0.25,
-    "discount_52w": 0.15,
-    "rsi_oversold": 0.15,
+    "margin_of_safety": 0.2489,
+    "discount_52w": 0.0024,
+    "rsi_oversold": 0.7488,
 }
 
 ROLLING_WINDOW_MONTHS = 36

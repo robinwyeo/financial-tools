@@ -151,14 +151,14 @@ def _build_raw_row(
 
 
 def compute_historical_factors(raw: dict[str, Any]) -> dict[str, float | None]:
-    """Compute factor columns, excluding earnings_revisions."""
+    """Compute factor sub-signal columns, excluding earnings_revisions."""
     all_factors = compute_all_factors(raw)
     all_factors.pop("earnings_revisions", None)
     return all_factors
 
 
 def compute_historical_bargain(raw: dict[str, Any], factors: dict[str, Any]) -> dict[str, Any]:
-    """Bargain score without analyst upside component."""
+    """Bargain score using the 3 reconstructable components (no analyst upside)."""
     bargain = compute_bargain_score(
         price=raw.get("price"),
         graham_ratio=factors.get("graham_ratio"),
@@ -175,7 +175,11 @@ def build_factor_panel(
     force: bool = False,
     max_quarters: int | None = None,
 ) -> pd.DataFrame:
-    """Build quarterly factor panel for historical backtesting."""
+    """Build quarterly factor panel for historical backtesting.
+
+    Stores all sub-signal columns for each factor group so the backtest engine
+    can apply rank-then-average aggregation, mirroring core.scoring.score_universe_df.
+    """
     if FACTOR_PANEL_PATH.exists() and not force:
         return pd.read_parquet(FACTOR_PANEL_PATH)
 
@@ -187,6 +191,13 @@ def build_factor_panel(
     qends = quarter_ends or QUARTER_ENDS
     if max_quarters is not None:
         qends = qends[:max_quarters]
+
+    # Collect all sub-signal column names for the backtestable groups
+    backtest_sub_cols: list[str] = [
+        col
+        for family in BACKTEST_FACTOR_FAMILIES
+        for col in FACTOR_SCORE_COLUMNS.get(family, [])
+    ]
 
     rows: list[dict[str, Any]] = []
     for qi, qend in enumerate(qends, start=1):
@@ -204,9 +215,9 @@ def build_factor_panel(
                 "price": raw.get("price"),
                 "market_cap": raw.get("market_cap"),
             }
-            for family, col in FACTOR_SCORE_COLUMNS.items():
-                if family in BACKTEST_FACTOR_FAMILIES:
-                    row[col] = factors.get(col)
+            # Store each sub-signal column for the backtestable groups
+            for col in backtest_sub_cols:
+                row[col] = factors.get(col)
             row["bargain_score"] = bargain.get("score")
             for comp in BARGAIN_BACKTEST_COMPONENTS:
                 row[f"bargain_{comp}"] = (bargain.get("components") or {}).get(comp)

@@ -387,6 +387,7 @@ def tune_bargain_weights(
     n_samples: int = 200,
     seed: int = 7,
     panel: pd.DataFrame | None = None,
+    prices: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """
     Tune bargain component weights by ranking on historical bargain_score vs forward return.
@@ -395,20 +396,29 @@ def tune_bargain_weights(
     from backtest.data.prices import load_prices
     from backtest.engine import _forward_quarter_returns
 
-    prices = load_prices()
+    if prices is None:
+        prices = load_prices()
     fwd = _forward_quarter_returns(panel, prices)
     baseline = current_baseline_bargain_weights()
     rng = np.random.default_rng(seed)
+
+    # Map quarter_end → next quarter_end for forward-return look-up.
+    # precompute_forward_returns labels each return row with the quarter it ENDS
+    # at (next_q), so we must match bargain scores at qend with fwd returns at
+    # next_q — the same convention used by _compute_ic in engine.py.
+    qends_sorted = sorted(panel["quarter_end"].unique())
+    next_qend: dict = {q: qends_sorted[i + 1] for i, q in enumerate(qends_sorted[:-1])}
 
     def score_with_weights(weights: dict[str, float]) -> float:
         ics: list[float] = []
         comp_cols = {
             "margin_of_safety": "bargain_margin_of_safety",
-            "discount_ath": "bargain_discount_ath",
             "discount_52w": "bargain_discount_52w",
             "rsi_oversold": "bargain_rsi_oversold",
         }
         for qend, grp in panel.groupby("quarter_end"):
+            if qend not in next_qend:
+                continue
             scores = []
             for _, row in grp.iterrows():
                 weighted = 0.0
@@ -425,13 +435,17 @@ def tune_bargain_weights(
             if not scores:
                 continue
             s_df = pd.DataFrame(scores).dropna()
-            f_df = fwd[fwd["quarter_end"] == qend]
+            # Use forward returns at the NEXT quarter (not the current quarter).
+            f_df = fwd[fwd["quarter_end"] == next_qend[qend]]
             merged = s_df.merge(f_df, on="ticker", how="inner")
             if len(merged) < 10:
                 continue
-            ic = merged["bargain_score"].corr(merged["fwd_return"], method="spearman")
-            if ic is not None and not np.isnan(ic):
-                ics.append(float(ic))
+            # Manual Spearman (rank + Pearson) — avoids scipy dependency.
+            a = merged["bargain_score"].rank()
+            b = merged["fwd_return"].rank()
+            ic = float(np.corrcoef(a, b)[0, 1])
+            if not np.isnan(ic):
+                ics.append(ic)
         return float(np.mean(ics)) if ics else 0.0
 
     baseline_ic = score_with_weights(baseline)

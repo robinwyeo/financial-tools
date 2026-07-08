@@ -53,101 +53,72 @@ CHART_HEIGHT_ANALYST_PIE = 158
 GAUGE_MAX_WIDTH = "132px"
 
 FACTOR_LABELS = {
-    "value": "Value",
-    "momentum": "Momentum (12-1)",
+    "value": "Value (earnings yield · B/M · FCF · Graham)",
+    "garp": "GARP (Lynch dividend-adjusted PEG)",
     "quality": "Quality / Profitability",
+    "balance_sheet": "Balance Sheet Strength",
+    "momentum": "Momentum (12-1)",
     "low_volatility": "Low Volatility",
-    "investment": "Investment (asset growth)",
+    "capital_discipline": "Capital Discipline (yield + asset growth)",
     "earnings_revisions": "Earnings Revisions",
-    "financial_strength": "Financial Strength (Piotroski)",
-    "garp": "GARP (Lynch PEG)",
-    "balance_sheet_strength": "Balance Sheet Strength",
-    "graham_value": "Graham Number Value",
-    "downside_protection": "Downside Protection (Marks)",
-    "earnings_quality": "Earnings Quality (Accruals)",
-    "shareholder_yield": "Shareholder Yield",
-    "capital_efficiency": "Capital Efficiency (ROIC)",
-    "distress_risk": "Distress Risk (Altman Z)",
 }
 
 BARGAIN_LABELS = {
-    "margin_of_safety": "Margin of Safety",
-    "discount_ath": "Discount to All-Time High",
+    "margin_of_safety": "Margin of Safety (Graham)",
     "discount_52w": "Discount to 52-Week High",
     "rsi_oversold": "RSI Oversold",
-    "analyst_upside": "Analyst Upside",
 }
 
 SHORT_FACTOR_LABELS = {
     "value": "Value",
-    "momentum": "Momentum",
-    "quality": "Quality",
-    "low_volatility": "Low Volatility",
-    "investment": "Investment",
-    "earnings_revisions": "Earnings Revisions",
-    "financial_strength": "Financial Strength",
     "garp": "GARP",
-    "balance_sheet_strength": "Balance Sheet",
-    "graham_value": "Graham Value",
-    "downside_protection": "Downside Protection",
-    "earnings_quality": "Earnings Quality",
-    "shareholder_yield": "Shareholder Yield",
-    "capital_efficiency": "Capital Efficiency",
-    "distress_risk": "Distress Risk",
+    "quality": "Quality",
+    "balance_sheet": "Balance Sheet",
+    "momentum": "Momentum",
+    "low_volatility": "Low Volatility",
+    "capital_discipline": "Capital Discipline",
+    "earnings_revisions": "Est. Revisions",
 }
 
-# Very short labels for the 15-spoke radar chart where space is tight.
+# Short labels for the 8-spoke radar chart.
 RADAR_FACTOR_LABELS: dict[str, str] = {
-    "value":                  "Value",
-    "momentum":               "Momentum",
-    "quality":                "Quality",
-    "low_volatility":         "Low Vol",
-    "investment":             "Investment",
-    "earnings_revisions":     "Est. Rev.",
-    "financial_strength":     "Piotroski",
-    "garp":                   "GARP",
-    "balance_sheet_strength": "Bal. Sheet",
-    "graham_value":           "Graham",
-    "downside_protection":    "Downside",
-    "earnings_quality":       "Accruals",
-    "shareholder_yield":      "Shr. Yield",
-    "capital_efficiency":     "ROIC",
-    "distress_risk":          "Altman Z",
+    "value":              "Value",
+    "garp":               "GARP",
+    "quality":            "Quality",
+    "balance_sheet":      "Bal. Sheet",
+    "momentum":           "Momentum",
+    "low_volatility":     "Low Vol",
+    "capital_discipline": "Cap. Disc.",
+    "earnings_revisions": "Est. Rev.",
 }
 
-# Conceptual groupings for the Factor Scorecard display.
+# Factor Scorecard display: 2 groups per column.
 # Each entry: (group_label, accent_color, [factor_keys])
 FACTOR_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
-    ("Valuation", "#14b8a6", ["value", "garp", "graham_value", "shareholder_yield"]),
-    ("Quality & Profitability", "#8b5cf6", ["quality", "capital_efficiency", "earnings_quality"]),
-    ("Financial Health", "#3b82f6", ["financial_strength", "balance_sheet_strength", "distress_risk", "investment"]),
-    ("Market & Sentiment", "#f59e0b", ["momentum", "earnings_revisions", "low_volatility", "downside_protection"]),
+    ("Valuation", "#14b8a6", ["value", "garp"]),
+    ("Quality & Health", "#8b5cf6", ["quality", "balance_sheet"]),
+    ("Returns & Capital", "#3b82f6", ["capital_discipline", "momentum"]),
+    ("Market & Sentiment", "#f59e0b", ["low_volatility", "earnings_revisions"]),
 ]
 
 FACTOR_COLORS = {
-    "value":                  "#14b8a6",
-    "momentum":               "#3b82f6",
-    "quality":                "#8b5cf6",
-    "low_volatility":         "#f59e0b",
-    "financial_strength":     "#6b7280",
-    "investment":             "#06b6d4",
-    "earnings_revisions":     "#ec4899",
-    "garp":                   "#10b981",
-    "balance_sheet_strength": "#60a5fa",
-    "graham_value":           "#a78bfa",
-    "downside_protection":    "#fbbf24",
-    "earnings_quality":       "#f97316",
-    "shareholder_yield":      "#34d399",
-    "capital_efficiency":     "#ef4444",
-    "distress_risk":          "#94a3b8",
+    "value":              "#14b8a6",
+    "garp":               "#10b981",
+    "quality":            "#8b5cf6",
+    "balance_sheet":      "#60a5fa",
+    "momentum":           "#3b82f6",
+    "low_volatility":     "#f59e0b",
+    "capital_discipline": "#34d399",
+    "earnings_revisions": "#ec4899",
 }
 
 METRIC_HELP = {
     "composite_score": (
-        "Single number from 0–100 that blends how this stock ranks on value, quality, momentum, "
-        "and other factors vs similar companies. Higher = the model likes it more overall; "
-        "50+ is the configured composite_min good-buy bar (see config.yaml). Only factors with available data are "
-        "included; check Factor Coverage to see how complete the score is."
+        "Single number from 0–100 that blends how this stock ranks on 8 factor groups "
+        "(value, GARP, quality, balance sheet, momentum, low volatility, capital discipline, "
+        "earnings revisions) vs S&P 500 peers. Each group rank-averages its own sub-signals "
+        "before weighting, so no single ratio dominates. 50+ is the configured composite_min "
+        "good-buy bar. Only groups with available data are included; check Factor Coverage."
     ),
     "price": (
         "What one share costs right now in dollars. This is market price, not a quality score—"
@@ -167,8 +138,8 @@ METRIC_HELP = {
         "Price divided by earnings per share over the last 12 months—the classic P/E multiple. "
         "Lower usually means a cheaper price tag per dollar of past earnings. Shown for context "
         "only: it is not part of the composite score because it varies by sector, is meaningless "
-        "when earnings are negative, and ignores growth and balance-sheet quality. See Lynch PEG, "
-        "Graham Ratio, and the Value factor for richer valuation context."
+        "when earnings are negative, and ignores growth and balance-sheet quality. See GARP, "
+        "the Value group (Graham ratio), and Quality for richer valuation and profitability context."
     ),
     "lynch_peg": (
         "Compares price to expected earnings growth and dividends (Peter Lynch’s “PEG” idea). "
@@ -208,64 +179,42 @@ METRIC_HELP = {
 # Hover copy for Factor Scorecard: what the metric means and how it's built.
 FACTOR_HELP: dict[str, str] = {
     "value": (
-        "How cheap the stock is vs peers, averaging earnings yield (EBIT/EV), "
-        "book equity to market cap, and free-cash-flow yield. Higher = better priced."
+        "Composite value rank: each of four sub-signals (earnings yield EBIT/EV, "
+        "FCF yield, book-to-market, Graham ratio) is ranked cross-sectionally then "
+        "averaged. Higher = cheaper vs peers on multiple measures."
+    ),
+    "garp": (
+        "Growth at a reasonable price (Peter Lynch): (earnings growth % + dividend yield %) "
+        "divided by P/E. Higher = more growth and income per dollar of valuation. "
+        "Falls back to 1/PEG when analyst growth estimates are unavailable."
+    ),
+    "quality": (
+        "Composite quality rank: seven sub-signals (gross profitability, ROE, ROA, "
+        "profit margin, ROIC, earnings quality/accruals, Piotroski F-Score) are each "
+        "ranked then averaged. Higher = more profitable and cleaner business."
+    ),
+    "balance_sheet": (
+        "Composite balance-sheet rank: net cash / market cap, low debt-to-equity "
+        "(1/(1+D/E)), and Altman Z-Score are each ranked then averaged. "
+        "Higher = more financial cushion and lower distress risk."
     ),
     "momentum": (
         "Trailing 12-month price return, skipping the most recent month to avoid "
         "short-term reversals. A higher rank means a stronger, more persistent uptrend."
     ),
-    "quality": (
-        "Business profitability and efficiency, averaging gross profit/assets, "
-        "return on assets, return on equity, and net profit margin. Higher = stronger franchise."
-    ),
     "low_volatility": (
-        "Inverse of annualized volatility from the past year of daily returns. "
-        "Calmer, steadier stocks rank higher; jumpy, high-swing names rank lower."
+        "Inverse of annualized 12-month return volatility (1/σ). "
+        "Calmer, steadier stocks rank higher; high-swing names rank lower."
     ),
-    "investment": (
-        "Year-over-year growth in total assets, but inverted: companies that expand "
-        "their balance sheet slowly rank higher, since aggressive asset growth tends to lag."
+    "capital_discipline": (
+        "Composite capital-discipline rank: shareholder yield (dividends + buybacks "
+        "/ market cap) and investment factor (inverted asset growth) are each ranked "
+        "then averaged. Higher = more cash returned, less balance-sheet expansion."
     ),
     "earnings_revisions": (
-        "Momentum in analyst sentiment — recent upgrades minus downgrades, blended "
-        "with how far the mean price target sits above the current price."
-    ),
-    "financial_strength": (
-        "Piotroski F-Score: nine pass/fail tests across profitability, leverage, "
-        "liquidity, and operating efficiency. More checks passed means a healthier balance sheet."
-    ),
-    "garp": (
-        "Growth at a reasonable price (Peter Lynch): (earnings growth % + dividend yield %) "
-        "divided by P/E. Higher = more growth and income per dollar of valuation."
-    ),
-    "balance_sheet_strength": (
-        "Balance-sheet resilience, combining net cash (cash minus debt) relative to "
-        "market cap with a low debt-to-equity ratio. Higher = more financial cushion."
-    ),
-    "graham_value": (
-        "Benjamin Graham value test, averaging the Graham fair value vs price ratio "
-        "(√(22.5 × EPS × book value)) with the current ratio for liquidity safety."
-    ),
-    "downside_protection": (
-        "Resilience in bad markets (Howard Marks idea): rewards smaller historical "
-        "max drawdowns and lower downside-only volatility. Higher = gentler losses."
-    ),
-    "earnings_quality": (
-        "How much reported profit is backed by real cash. Low accruals — earnings "
-        "close to operating cash flow — rank higher and signal cleaner accounting."
-    ),
-    "shareholder_yield": (
-        "Total cash returned to owners (dividends plus net share buybacks) divided "
-        "by market cap (Meb Faber). Higher = more capital handed back to shareholders."
-    ),
-    "capital_efficiency": (
-        "Return on invested capital = EBIT ÷ (debt + equity − cash). Measures how "
-        "much operating profit the business earns per dollar of capital deployed."
-    ),
-    "distress_risk": (
-        "Altman Z-Score from five balance-sheet and market ratios that flag bankruptcy "
-        "risk. A higher Z (rank) means lower distress risk and a safer financial profile."
+        "Analyst recommendation momentum: recent upgrades minus downgrades from "
+        "published recommendation history. Higher = improving analyst sentiment. "
+        "Live-only signal (excluded from historical backtesting)."
     ),
 }
 
@@ -906,7 +855,7 @@ def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
         bargain_score,
         bargain_label,
         bargain_color,
-        subtitle="Margin · discount · RSI",
+        subtitle="Graham · 52W discount · RSI",
         aria_label="Bargain score gauge",
         fill_color=bargain_color,
         max_width=GAUGE_MAX_WIDTH,

@@ -17,30 +17,18 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-# Theme-grouped defaults (kept in sync with config.yaml). Weights are assigned
-# per theme then split across correlated sub-factors; theme totals in comments.
+# CV-tuned defaults from DCA k-fold cross-validation on 2010-2026 S&P 500 panel.
+# 8 orthogonal groups replace the old 15 collinear families.
+# earnings_revisions is live-only (excluded from backtest tuning; kept at 0.05).
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    # Value theme (0.21)
-    "value": 0.07,
-    "garp": 0.07,
-    "graham_value": 0.07,
-    # Quality theme (0.24)
-    "quality": 0.06,
-    "financial_strength": 0.06,
-    "earnings_quality": 0.06,
-    "capital_efficiency": 0.06,
-    # Trend theme (0.15)
-    "momentum": 0.08,
-    "earnings_revisions": 0.07,
-    # Risk theme (0.10)
-    "low_volatility": 0.05,
-    "downside_protection": 0.05,
-    # Solvency theme (0.10)
-    "balance_sheet_strength": 0.05,
-    "distress_risk": 0.05,
-    # Capital-allocation theme (0.20)
-    "shareholder_yield": 0.10,
-    "investment": 0.10,
+    "value": 0.0301,
+    "garp": 0.4348,
+    "quality": 0.1097,
+    "balance_sheet": 0.1437,
+    "momentum": 0.0724,
+    "low_volatility": 0.1390,
+    "capital_discipline": 0.0703,
+    "earnings_revisions": 0.0500,
 }
 
 
@@ -51,12 +39,13 @@ def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]
     return {family: float(weights.get(family, default)) for family, default in _DEFAULT_WEIGHTS.items()}
 
 
+# Bargain component defaults from historical IC tuning (correct forward-return alignment).
+# RSI oversold leads (mean-reversion signal); margin of safety is secondary.
+# discount_52w has near-zero weight empirically (correlated with RSI oversold).
 _DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.30,
-    "discount_ath": 0.25,
-    "discount_52w": 0.15,
-    "rsi_oversold": 0.15,
-    "analyst_upside": 0.15,
+    "margin_of_safety": 0.2489,
+    "discount_52w": 0.0024,
+    "rsi_oversold": 0.7488,
 }
 
 
@@ -71,8 +60,8 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config or load_config()
     t = cfg.get("thresholds", {})
     return {
-        "composite_min": float(t.get("composite_min", 50)),
-        "bargain_min": float(t.get("bargain_min", 50)),
+        "composite_min": float(t.get("composite_min", 51.3)),
+        "bargain_min": float(t.get("bargain_min", 49.3)),
         "implied_upside_min_pct": float(t.get("implied_upside_min_pct", 15)),
         "exclude_sell_consensus": bool(t.get("exclude_sell_consensus", True)),
     }

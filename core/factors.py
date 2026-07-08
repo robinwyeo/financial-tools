@@ -34,15 +34,10 @@ def compute_value_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     book_to_market = _ratio(book_equity, market_cap)
     fcf_yield = _ratio(fcf, market_cap)
 
-    # Composite value: average of available signals (higher = cheaper)
-    parts = [v for v in [earnings_yield, book_to_market, fcf_yield] if v is not None]
-    value_composite = float(np.mean(parts)) if parts else None
-
     return {
         "earnings_yield": earnings_yield,
         "book_to_market": book_to_market,
         "fcf_yield": fcf_yield,
-        "value_composite": value_composite,
     }
 
 
@@ -67,15 +62,11 @@ def compute_quality_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     roe = _ratio(net_income, book_equity)
     profit_margin = _ratio(net_income, revenue)
 
-    parts = [v for v in [gross_profitability, roe, roa, profit_margin] if v is not None]
-    quality_composite = float(np.mean(parts)) if parts else None
-
     return {
         "gross_profitability": gross_profitability,
         "roe": roe,
         "roa": roa,
         "profit_margin": profit_margin,
-        "quality_composite": quality_composite,
     }
 
 
@@ -92,14 +83,14 @@ def compute_investment_factor(raw: dict[str, Any]) -> dict[str, float | None]:
     if ta is None or ta_prior is None or ta_prior == 0:
         return {"asset_growth": None, "investment": None}
     growth = (ta / ta_prior) - 1.0
-    # Store negative growth so higher score = lower investment (better)
     return {"asset_growth": growth, "investment": -growth}
 
 
 def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
     """
-    Proxy for earnings revisions from recommendation trends and target upside.
-    Uses yfinance recommendation history when available.
+    Analyst recommendation momentum: recent upgrades minus downgrades.
+    Uses yfinance recommendation history only (no target-price blend to avoid
+    double-counting with the analyst_upside good-buy gate).
     """
     recs: pd.DataFrame = raw.get("recommendations", pd.DataFrame())
     score = None
@@ -117,15 +108,6 @@ def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
             period_score, _, _ = recommendation_period_shift(df)
             if period_score is not None:
                 score = period_score * 10.0
-
-    price = raw.get("price")
-    target = raw.get("target_mean")
-    if price and target and price > 0:
-        upside = (target / price) - 1.0
-        if score is None:
-            score = upside * 5
-        else:
-            score = 0.6 * score + 0.4 * (upside * 5)
 
     return {"earnings_revisions": score}
 
@@ -222,7 +204,6 @@ def _pct_from_decimal(val: float | None) -> float | None:
     """Convert yfinance decimal rates (0.15) to percentage points (15)."""
     if val is None:
         return None
-    # Values > 1 are likely already percentage points (e.g. dividend yield edge cases)
     if abs(val) > 1:
         return val
     return val * 100.0
@@ -251,10 +232,8 @@ def compute_garp_factor(raw: dict[str, Any]) -> dict[str, float | None]:
         if numerator_parts:
             dividend_adjusted_peg = sum(numerator_parts) / trailing_pe
 
-    # Primary score: higher dividend-adjusted PEG = better (Lynch: >2 great)
     garp_score = dividend_adjusted_peg
     if garp_score is None and peg_ratio is not None and peg_ratio > 0:
-        # Fallback when growth unavailable: invert plain PEG (lower PEG = cheaper growth)
         garp_score = 1.0 / peg_ratio
 
     return {
@@ -280,7 +259,6 @@ def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | Non
 
     net_cash_to_mcap = _ratio(net_cash, market_cap)
 
-    # Invert D/E so lower leverage scores higher; cap extreme values
     low_leverage = None
     if debt_to_equity is not None:
         if debt_to_equity <= 0:
@@ -288,21 +266,18 @@ def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | Non
         else:
             low_leverage = 1.0 / (1.0 + debt_to_equity)
 
-    parts = [v for v in [net_cash_to_mcap, low_leverage] if v is not None]
-    balance_sheet_strength = float(np.mean(parts)) if parts else None
-
     return {
         "net_cash": net_cash,
         "net_cash_to_mcap": net_cash_to_mcap,
         "low_leverage": low_leverage,
-        "balance_sheet_strength": balance_sheet_strength,
     }
 
 
 def compute_graham_value(raw: dict[str, Any]) -> dict[str, float | None]:
     """
-    Graham Number margin of safety: sqrt(22.5 * EPS * BVPS) / price.
-    Ratio > 1 means price below Graham fair value.
+    Graham Number: sqrt(22.5 * EPS * BVPS) / price.
+    Ratio > 1 means price below Graham fair value (margin of safety).
+    current_ratio retained for display only; not used in composite scoring.
     """
     price = raw.get("price")
     trailing_eps = raw.get("trailing_eps")
@@ -325,29 +300,22 @@ def compute_graham_value(raw: dict[str, Any]) -> dict[str, float | None]:
         graham_fair_value = math.sqrt(22.5 * trailing_eps * book_value)
         graham_ratio = _ratio(graham_fair_value, price)
 
-    parts = [v for v in [graham_ratio, current_ratio] if v is not None]
-    graham_value = float(np.mean(parts)) if parts else None
-
     return {
         "graham_fair_value": graham_fair_value,
         "graham_ratio": graham_ratio,
         "current_ratio": current_ratio,
-        "graham_value": graham_value,
     }
 
 
 def compute_downside_protection(raw: dict[str, Any]) -> dict[str, float | None]:
     """
-    Marks-style downside risk: max drawdown and downside deviation.
-    Higher score = smaller drawdowns and lower downside volatility.
+    Historical downside metrics (retained for display; excluded from composite).
     """
     max_drawdown = raw.get("max_drawdown")
     downside_deviation = raw.get("downside_deviation")
 
-    # max_drawdown is negative; negate so smaller drawdown = higher score
     drawdown_score = -max_drawdown if max_drawdown is not None else None
 
-    # Invert downside deviation so lower risk = higher score
     downside_score = None
     if downside_deviation is not None:
         downside_score = 1.0 / (1.0 + downside_deviation)
@@ -388,7 +356,7 @@ def compute_shareholder_yield(raw: dict[str, Any]) -> dict[str, float | None]:
     """
     Faber shareholder yield: total cash returned to shareholders as a fraction of market cap.
     shareholder_yield = (dividends_paid + net_buybacks) / market_cap
-    Higher = better (more cash returned per dollar of market value).
+    Higher = better (more capital handed back to shareholders).
     """
     market_cap = raw.get("market_cap")
     dividends_paid = raw.get("dividends_paid")
@@ -399,13 +367,11 @@ def compute_shareholder_yield(raw: dict[str, Any]) -> dict[str, float | None]:
     total_returned = None
 
     if repurchase_of_stock is not None:
-        # yfinance reports repurchases as negative cash outflow; negate to get positive buyback
         net_buybacks = -repurchase_of_stock
 
     if market_cap and market_cap > 0:
         parts = []
         if dividends_paid is not None:
-            # Cash dividends are reported as negative outflow; abs gives amount paid
             parts.append(abs(dividends_paid))
         if net_buybacks is not None and net_buybacks > 0:
             parts.append(net_buybacks)
@@ -441,7 +407,6 @@ def compute_capital_efficiency(raw: dict[str, Any]) -> dict[str, float | None]:
 
     if total_debt is not None and book_equity is not None:
         ic = total_debt + book_equity - (total_cash or 0.0)
-        # Floor at 1% of book equity to avoid division by near-zero or negative IC
         floor = max(abs(book_equity) * 0.01, 1.0) if book_equity else 1.0
         invested_capital = max(ic, floor)
 
@@ -463,7 +428,7 @@ def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
       X3 = EBIT / total assets
       X4 = market cap / total liabilities
       X5 = revenue / total assets
-    Higher Z = lower distress risk; score = Z directly.
+    Higher Z = lower distress risk.
     """
     current_assets = raw.get("current_assets")
     current_liabilities = raw.get("current_liabilities")
@@ -501,7 +466,6 @@ def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
     if not available:
         return {"altman_z": None}
 
-    # Partial Z if some components are unavailable (scales by available weight fraction)
     total_weight = sum(w for w, _ in available)
     full_weight = sum(weights)
     z_partial = sum(w * v for w, v in available)
@@ -531,21 +495,20 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     return out
 
 
-# Columns used for cross-sectional scoring (one per factor family)
-FACTOR_SCORE_COLUMNS = {
-    "value": "value_composite",
-    "momentum": "momentum_12_1",
-    "quality": "quality_composite",
-    "low_volatility": "low_volatility",
-    "investment": "investment",
-    "earnings_revisions": "earnings_revisions",
-    "financial_strength": "financial_strength",
-    "garp": "garp",
-    "balance_sheet_strength": "balance_sheet_strength",
-    "graham_value": "graham_value",
-    "downside_protection": "downside_protection",
-    "earnings_quality": "earnings_quality",
-    "shareholder_yield": "shareholder_yield",
-    "capital_efficiency": "roic",
-    "distress_risk": "altman_z",
+# Columns used for cross-sectional scoring.
+# Each group is scored by: rank each sub-signal cross-sectionally → average
+# available sub-signal percentiles → group percentile score.
+# Composite = weighted average of group percentile scores.
+FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
+    "value": ["earnings_yield", "fcf_yield", "book_to_market", "graham_ratio"],
+    "garp": ["garp"],
+    "quality": [
+        "gross_profitability", "roe", "roa", "profit_margin",
+        "roic", "earnings_quality", "financial_strength",
+    ],
+    "balance_sheet": ["net_cash_to_mcap", "low_leverage", "altman_z"],
+    "momentum": ["momentum_12_1"],
+    "low_volatility": ["low_volatility"],
+    "capital_discipline": ["shareholder_yield", "investment"],
+    "earnings_revisions": ["earnings_revisions"],
 }

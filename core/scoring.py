@@ -197,10 +197,34 @@ def _composite_and_coverage(
     return composite, coverage
 
 
-def _is_meaningful_value(val: Any) -> bool:
+METADATA_OVERLAY_COLUMNS = frozenset({
+    "name",
+    "sector",
+    "industry",
+    "price",
+    "market_cap",
+})
+
+LIVE_FACTOR_OVERLAY_COLUMNS = frozenset({
+    "momentum_12_1",
+    "low_volatility",
+    "volatility_12m",
+    "max_drawdown",
+    "downside_deviation",
+})
+
+# Zero means "no signal" for these columns, not a measured value.
+ZERO_NEUTRAL_COLUMNS = frozenset({
+    "earnings_revisions",
+})
+
+
+def _is_meaningful_value(val: Any, *, column: str | None = None) -> bool:
     if val is None:
         return False
     if isinstance(val, float) and np.isnan(val):
+        return False
+    if column in ZERO_NEUTRAL_COLUMNS and isinstance(val, (int, float)) and val == 0:
         return False
     if isinstance(val, str):
         stripped = val.strip()
@@ -209,10 +233,17 @@ def _is_meaningful_value(val: Any) -> bool:
     return True
 
 
+def _should_overlay_live_value(key: str) -> bool:
+    return key in METADATA_OVERLAY_COLUMNS or key in LIVE_FACTOR_OVERLAY_COLUMNS
+
+
 def _merge_ticker_row_with_universe(row: dict, uni: pd.DataFrame, ticker: str) -> dict:
     """
     Overlay a freshly built ticker row onto the universe snapshot row.
-    Keeps snapshot factor values when the live fetch is partial (e.g. empty quote info).
+
+    Only price-sensitive factors and display metadata are refreshed live.
+    Structural financial factors (GARP, quality, balance sheet, etc.) stay on
+    the snapshot so partial or noisy live fetches cannot corrupt scores.
     """
     existing = uni[uni["ticker"].astype(str).str.upper() == ticker]
     if existing.empty:
@@ -223,7 +254,9 @@ def _merge_ticker_row_with_universe(row: dict, uni: pd.DataFrame, ticker: str) -
             continue
         if key == "name" and val == ticker:
             continue
-        if _is_meaningful_value(val):
+        if not _should_overlay_live_value(key):
+            continue
+        if _is_meaningful_value(val, column=key):
             merged[key] = val
     merged["ticker"] = ticker
     return merged
@@ -394,6 +427,49 @@ def score_universe(config: dict[str, Any] | None = None) -> pd.DataFrame:
     if uni is None or uni.empty:
         return pd.DataFrame()
     return score_universe_df(uni, config)
+
+
+def apply_universe_snapshot_scoring(
+    analysis: dict[str, Any],
+    scored_universe: pd.DataFrame,
+    ticker: str,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Replace composite and factor percentiles with snapshot-universe scores.
+
+    Keeps live price, analyst, and bargain data from score_ticker while ensuring
+    the dashboard gauge matches the universe rankings table.
+    """
+    cfg = config or load_config()
+    ticker = ticker.upper().strip()
+    if scored_universe is None or scored_universe.empty:
+        return analysis
+
+    mask = scored_universe["ticker"].astype(str).str.upper() == ticker
+    if not mask.any():
+        return analysis
+
+    snap_row = scored_universe.loc[mask].iloc[0]
+    updated = {**analysis}
+    updated["composite"] = snap_row.get("composite")
+    updated["factor_coverage_pct"] = snap_row.get("factor_coverage_pct")
+
+    factor_breakdown: dict[str, dict[str, Any]] = {}
+    for family in FACTOR_SCORE_COLUMNS:
+        factor_breakdown[family] = {"percentile": snap_row.get(f"pct_{family}")}
+    updated["factor_breakdown"] = factor_breakdown
+
+    analyst = updated.get("analyst") or {}
+    bargain_score = (updated.get("bargain") or {}).get("score")
+    updated["is_good_buy"] = _evaluate_good_buy(
+        updated["composite"],
+        analyst.get("implied_upside_pct"),
+        analyst,
+        get_thresholds(cfg),
+        bargain_score=bargain_score,
+    )
+    return updated
 
 
 def _score_without_universe(

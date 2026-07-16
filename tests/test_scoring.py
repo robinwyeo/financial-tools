@@ -9,6 +9,7 @@ from core.scoring import (
     _composite_and_coverage,
     _evaluate_good_buy,
     _merge_ticker_row_with_universe,
+    apply_universe_snapshot_scoring,
     compute_bargain_score,
     score_ticker,
     score_universe_df,
@@ -196,6 +197,54 @@ def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
     assert merged["sector"] == "Consumer Cyclical"
     assert merged["earnings_yield"] == 0.05
     assert merged["garp"] == 2.3
+
+
+def test_merge_ticker_row_keeps_structural_factors_when_live_differs():
+    uni = pd.DataFrame(
+        [
+            {
+                "ticker": "COST",
+                "garp": 2.33,
+                "earnings_revisions": 0.33,
+                "momentum_12_1": -0.035,
+            }
+        ]
+    )
+    live = {
+        "ticker": "COST",
+        "garp": 0.95,
+        "earnings_revisions": 0.0,
+        "momentum_12_1": -0.009,
+        "price": 955.0,
+    }
+    merged = _merge_ticker_row_with_universe(live, uni, "COST")
+    assert merged["garp"] == 2.33
+    assert merged["earnings_revisions"] == 0.33
+    assert merged["momentum_12_1"] == pytest.approx(-0.009)
+    assert merged["price"] == 955.0
+
+
+def test_apply_universe_snapshot_scoring_overrides_composite():
+    scored = pd.DataFrame(
+        [
+            {
+                "ticker": "COST",
+                "composite": 80.4,
+                "factor_coverage_pct": 100.0,
+                "pct_garp": 97.6,
+            }
+        ]
+    )
+    analysis = {
+        "ticker": "COST",
+        "composite": 64.4,
+        "factor_breakdown": {"garp": {"percentile": 62.0}},
+        "analyst": {"implied_upside_pct": 13.0, "consensus_label": "Buy"},
+        "bargain": {"score": 44.0},
+    }
+    updated = apply_universe_snapshot_scoring(analysis, scored, "COST", _minimal_config())
+    assert updated["composite"] == pytest.approx(80.4)
+    assert updated["factor_breakdown"]["garp"]["percentile"] == pytest.approx(97.6)
 
 
 def test_score_ticker_survives_empty_quote_info(monkeypatch):

@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
 from core.factors import FACTOR_SCORE_COLUMNS
 from core.data import fetch_etf_holdings, fetch_etf_info, fetch_price_history, is_etf
-from core.scoring import score_ticker, score_universe
+from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe
 from core.universe import load_universe_snapshot
 
 st.set_page_config(
@@ -807,7 +807,7 @@ def _arc_gauge_html(
             f'fill="none" stroke="{stroke}" stroke-width="{sw}" stroke-linecap="round"/>'
         )
 
-    score_txt = f"{score:.0f}" if score is not None else "N/A"
+    score_txt = f"{score:.1f}" if score is not None else "N/A"
     compact = max_width != "130px"
     font_sz = 34 if score is not None and compact else (36 if score is not None else 22)
 
@@ -834,7 +834,18 @@ def _arc_gauge_html(
     )
 
 
-def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
+def _format_snapshot_date(raw_date: str | None) -> str | None:
+    if not raw_date:
+        return None
+    return raw_date[:10] if len(raw_date) >= 10 else raw_date
+
+
+def render_composite_card(
+    analysis: dict,
+    *,
+    bordered: bool = True,
+    snapshot_date: str | None = None,
+) -> None:
     composite = analysis.get("composite")
     comp_color = gauge_score_color(composite)
     comp_label = gauge_score_label(composite)
@@ -843,11 +854,18 @@ def render_composite_card(analysis: dict, *, bordered: bool = True) -> None:
     bargain_color = gauge_score_color(bargain_score)
     bargain_label = gauge_score_label(bargain_score)
 
+    date_label = _format_snapshot_date(snapshot_date)
+    composite_subtitle = (
+        f"Composite scored vs. universe snapshot from {date_label}"
+        if date_label
+        else "vs. Global Universe"
+    )
+
     composite_gauge = _arc_gauge_html(
         composite,
         comp_label,
         comp_color,
-        subtitle="vs. Global Universe",
+        subtitle=composite_subtitle,
         aria_label="Composite score gauge",
         fill_color=comp_color,
         max_width=GAUGE_MAX_WIDTH,
@@ -1325,9 +1343,16 @@ def render_etf_view(ticker: str) -> None:
             st.write(info["description"])
 
 
-def render_stock_view(ticker: str, config: dict) -> None:
+def render_stock_view(
+    ticker: str,
+    config: dict,
+    scored_universe: pd.DataFrame | None = None,
+    snapshot_date: str | None = None,
+) -> None:
     with st.spinner(f"Analyzing {ticker}…"):
         analysis = score_ticker(ticker, config)
+        if scored_universe is not None and not scored_universe.empty:
+            analysis = apply_universe_snapshot_scoring(analysis, scored_universe, ticker, config)
 
     if analysis.get("warning"):
         st.warning(analysis["warning"])
@@ -1357,7 +1382,7 @@ def render_stock_view(ticker: str, config: dict) -> None:
     _dashboard_row_anchor(1)
     row1_left, row1_right = st.columns([2.6, 4.7], gap="small", border=True)
     with row1_left:
-        render_composite_card(analysis, bordered=False)
+        render_composite_card(analysis, bordered=False, snapshot_date=snapshot_date)
     with row1_right:
         render_factor_scorecard_card(analysis, bordered=False)
 
@@ -1379,13 +1404,16 @@ def render_stock_view(ticker: str, config: dict) -> None:
         st.json(analysis.get("factors_raw", {}))
 
 
-def render_universe_rankings(config: dict) -> None:
+def render_universe_rankings(
+    config: dict,
+    scored_universe: pd.DataFrame | None = None,
+) -> None:
     uni = load_universe_snapshot()
     if uni is None or uni.empty:
         st.warning("No universe snapshot found. Run the monthly universe job to build one.")
         return
 
-    scored = score_universe(config)
+    scored = scored_universe if scored_universe is not None else score_universe(config)
     if scored.empty or "composite" not in scored.columns:
         st.warning("Unable to score universe.")
         return
@@ -1440,19 +1468,26 @@ def main() -> None:
             date = snapshot["snapshot_date"].iloc[0] if "snapshot_date" in snapshot.columns else "unknown"
             st.caption(f"Universe: {len(snapshot)} tickers (snapshot: {date})")
 
+    snapshot = load_universe_snapshot()
+    snapshot_date = None
+    if snapshot is not None and not snapshot.empty and "snapshot_date" in snapshot.columns:
+        snapshot_date = str(snapshot["snapshot_date"].iloc[0])
+
+    scored_universe = score_universe(config)
+
     if not ticker:
         st.markdown("## Stock Metrics Tool")
         st.caption("Enter a ticker in the sidebar to get started.")
-        render_universe_rankings(config)
+        render_universe_rankings(config, scored_universe)
         return
 
     if is_etf(ticker):
         render_etf_view(ticker)
     else:
-        render_stock_view(ticker, config)
+        render_stock_view(ticker, config, scored_universe, snapshot_date)
 
     st.markdown("---")
-    render_universe_rankings(config)
+    render_universe_rankings(config, scored_universe)
 
 
 if __name__ == "__main__":

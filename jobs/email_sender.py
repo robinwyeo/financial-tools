@@ -116,8 +116,8 @@ def format_scorecard_email(
     <p style="color:#6b7280;font-size:14px;">
     Buy criteria: composite &ge; {thresholds['composite_min']},
     bargain &ge; {thresholds['bargain_min']},
-    upside &ge; {thresholds['implied_upside_min_pct']}%,
     consensus not Sell.
+    Analyst upside is shown for context (not a hard gate).
     </p>
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:900px;">
     <tr style="background:#f9fafb;">

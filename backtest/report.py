@@ -172,6 +172,7 @@ def _dca_vs_spy_section(dca: dict) -> list[str]:
 
 def generate_report(output_path: Path | None = None) -> str:
     """Build markdown report from saved result artifacts."""
+    comparison = _load_json(RESULTS_DIR / "weight_candidate_comparison.json")
     tuning = _load_json(RESULTS_DIR / "tuning_results.json")
     bargain = _load_json(RESULTS_DIR / "bargain_tuning_results.json")
     thresholds = _load_json(RESULTS_DIR / "threshold_calibration.json")
@@ -184,44 +185,65 @@ def generate_report(output_path: Path | None = None) -> str:
         "",
         "## Summary",
         "",
-        "This report evaluates composite/bargain score weights and good-buy thresholds",
-        "using a quarterly walk-forward backtest on historical S&P 500 constituents.",
+        "This report validates composite/bargain score weights and good-buy thresholds",
+        "using long-horizon (1y/3y/5y) forward returns and gated DCA buy-and-hold",
+        "simulations on historical S&P 500 constituents.",
         "",
         "## Caveats",
         "",
         "- Residual survivorship bias: delisted tickers may lack price history in free data.",
-        "- `earnings_revisions` and `analyst_upside` are excluded from historical tuning.",
-        "- Single historical path: walk-forward splits reduce but do not eliminate overfitting.",
+        "- `earnings_revisions` is live-only and excluded from historical validation.",
+        "- Analyst upside is informational (not a hard gate) and not historically backtested.",
+        "- Expanding-window folds + bootstrap CIs reduce but do not eliminate path dependence.",
         "- SEC EDGAR fundamentals are point-in-time by filing date; reporting lags apply.",
         "",
     ]
 
-    if tuning:
-        winner = tuning.get("winner", {})
-        baseline = tuning.get("baseline", {})
+    if comparison:
         lines.extend(
             [
-                "## Factor Weight Tuning",
+                "## Named Weight Candidate Comparison",
                 "",
-                f"Winner: **{winner.get('name', 'n/a')}**",
+                f"Recommended: **{comparison.get('recommended', 'n/a')}**",
+                f"Primary horizon: **{comparison.get('primary_horizon', '3y')}**",
                 "",
-                "### Validation metrics",
-                "",
-                f"- Rolling 3y win rate vs SPY: {winner.get('valid', {}).get('rolling_win_rate', 0):.1%}",
-                f"- Median 3y excess return: {winner.get('valid', {}).get('median_excess', 0):.2%}",
-                f"- Mean rank IC: {winner.get('valid', {}).get('mean_ic', 0):.3f}",
-                "",
-                "### Test metrics (hold-out)",
-                "",
-                f"- Rolling 3y win rate vs SPY: {winner.get('test', {}).get('rolling_win_rate', 0):.1%}",
-                f"- Median 3y excess return: {winner.get('test', {}).get('median_excess', 0):.2%}",
-                "",
-                "### Baseline (current config)",
-                "",
-                f"- Validation win rate: {baseline.get('valid', {}).get('rolling_win_rate', 0):.1%}",
-                f"- Test win rate: {baseline.get('test', {}).get('rolling_win_rate', 0):.1%}",
+                "| Candidate | 3y IC | Excess mean | 95% CI | % folds > 0 |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in comparison.get("candidates", []):
+            ics = row.get("horizon_ics") or {}
+            ci = f"[{row.get('excess_ci_low', float('nan')):.2%}, {row.get('excess_ci_high', float('nan')):.2%}]"
+            lines.append(
+                f"| {row.get('name')} | {ics.get('3y', 0):.3f} | "
+                f"{row.get('excess_mean', 0):.2%} | {ci} | "
+                f"{row.get('frac_folds_positive', 0):.0%} |"
+            )
+        lines.append("")
+        for cmp_row in comparison.get("comparisons", []):
+            if cmp_row.get("indistinguishable"):
+                lines.append(
+                    f"- **{cmp_row.get('winner')}** vs **{cmp_row.get('challenger')}**: "
+                    "indistinguishable (bootstrap CIs overlap)."
+                )
+        lines.extend(
+            [
                 "",
                 "### Recommended factor weights",
+                "",
+                "```yaml",
+            ]
+        )
+        for k, v in sorted((comparison.get("recommended_weights") or {}).items()):
+            lines.append(f"  {k}: {v:.4f}")
+        lines.extend(["```", ""])
+    elif tuning:
+        winner = tuning.get("winner", {})
+        lines.extend(
+            [
+                "## Factor Weight Tuning (legacy search)",
+                "",
+                f"Winner: **{winner.get('name', 'n/a')}**",
                 "",
                 "```yaml",
             ]
@@ -233,9 +255,10 @@ def generate_report(output_path: Path | None = None) -> str:
     if bargain:
         lines.extend(
             [
-                "## Bargain Weight Tuning",
+                "## Bargain Weight Validation",
                 "",
-                f"- Winner mean IC: {bargain.get('winner_mean_ic', 0):.3f}",
+                f"- Winner: **{bargain.get('winner_name', 'n/a')}**",
+                f"- Winner mean IC ({bargain.get('horizon', '3y')}): {bargain.get('winner_mean_ic', 0):.3f}",
                 f"- Baseline mean IC: {bargain.get('baseline_mean_ic', 0):.3f}",
                 "",
                 "### Recommended bargain weights",
@@ -252,6 +275,7 @@ def generate_report(output_path: Path | None = None) -> str:
             [
                 "## Threshold Calibration",
                 "",
+                f"- Horizon: **{thresholds.get('horizon', '3y')}**",
                 f"- composite_min: **{thresholds.get('composite_min', 50):.1f}**",
                 f"- bargain_min: **{thresholds.get('bargain_min', 50):.1f}**",
                 "",

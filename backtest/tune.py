@@ -12,24 +12,33 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from backtest.constants import RESULTS_DIR
+from backtest.constants import (
+    BARGAIN_BACKTEST_COMPONENTS,
+    DCA_TOP_N,
+    PRIMARY_EVAL_HORIZON,
+    RESULTS_DIR,
+)
 from backtest.engine import (
     BacktestResult,
+    bootstrap_mean_ci,
+    compute_horizon_ics,
     dca_fold_excess_roi,
     init_backtest_cache,
+    make_expanding_window_folds,
     make_quarter_folds,
     objective_tuple,
+    precompute_multi_horizon_returns,
     precompute_quarter_end_prices,
     run_backtest,
     score_factor_panel,
     split_period,
 )
-from backtest.constants import DCA_TOP_N
 from backtest.data.prices import load_delisted_catalog, load_prices
 from backtest.factors import load_factor_panel
 from backtest.weights import (
     current_baseline_bargain_weights,
     current_baseline_factor_weights,
+    named_weight_candidates,
     random_bargain_weights,
     random_theme_weights,
     theme_weights_to_factor_weights,
@@ -39,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 TUNING_RESULTS_PATH = RESULTS_DIR / "tuning_results.json"
 CV_TUNING_RESULTS_PATH = RESULTS_DIR / "tuning_results_dca_cv.json"
+CANDIDATE_COMPARISON_PATH = RESULTS_DIR / "weight_candidate_comparison.json"
 
 # How hard to punish valid->test degradation in the robustness objective.
 # A candidate that spikes on validation but collapses on test (overfit) is
@@ -383,6 +393,86 @@ def robust_objective(
     return (score, worst_win, avg_ic)
 
 
+def _bargain_score_with_weights(panel: pd.DataFrame, weights: dict[str, float]) -> pd.DataFrame:
+    """Compute per-row bargain scores from component columns and weights."""
+    comp_cols = {key: f"bargain_{key}" for key in BARGAIN_BACKTEST_COMPONENTS}
+    rows: list[dict[str, Any]] = []
+    for _, row in panel.iterrows():
+        weighted = 0.0
+        avail = 0.0
+        for key, col in comp_cols.items():
+            val = row.get(col)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                continue
+            w = weights.get(key, 0.0)
+            weighted += float(val) * w
+            avail += w
+        score = weighted / avail if avail > 0 else np.nan
+        rows.append(
+            {
+                "quarter_end": row["quarter_end"],
+                "ticker": row["ticker"],
+                "bargain_score": score,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def validate_bargain_weights(
+    panel: pd.DataFrame | None = None,
+    prices: pd.DataFrame | None = None,
+    horizon: str = PRIMARY_EVAL_HORIZON,
+) -> dict[str, Any]:
+    """
+    Validate (not search) default long-horizon bargain weights via horizon IC.
+
+    Optionally compares a few fixed alternative weightings for reporting.
+    """
+    panel = panel if panel is not None else load_factor_panel()
+    prices = prices if prices is not None else load_prices()
+    multi = precompute_multi_horizon_returns(panel, prices)
+    baseline = current_baseline_bargain_weights()
+
+    candidates = {
+        "default_long_horizon": baseline,
+        "graham_heavy": {"margin_of_safety": 0.55, "valuation_vs_history": 0.30, "discount_52w": 0.15},
+        "equal": {"margin_of_safety": 1 / 3, "valuation_vs_history": 1 / 3, "discount_52w": 1 / 3},
+    }
+
+    results: dict[str, Any] = {}
+    for name, weights in candidates.items():
+        scored = _bargain_score_with_weights(panel, weights)
+        scored = scored.rename(columns={"bargain_score": "score"})
+        # Adapt to compute_horizon_ics expecting score_col on scored with quarter_end.
+        scored_for_ic = scored.rename(columns={"score": "bargain_score"})
+        ics = compute_horizon_ics(scored_for_ic, multi, score_col="bargain_score")
+        results[name] = {"weights": weights, "horizon_ics": ics, "primary_ic": ics.get(horizon, 0.0)}
+
+    # Prefer default unless another candidate is clearly better on the primary horizon.
+    winner_name = max(results, key=lambda n: results[n]["primary_ic"])
+    winner = results[winner_name]
+    # Stick with default when indistinguishable (within 0.01 IC).
+    default_ic = results["default_long_horizon"]["primary_ic"]
+    if winner_name != "default_long_horizon" and winner["primary_ic"] - default_ic < 0.01:
+        winner_name = "default_long_horizon"
+        winner = results[winner_name]
+
+    out = {
+        "objective": f"validate_bargain_ic_{horizon}",
+        "horizon": horizon,
+        "winner_name": winner_name,
+        "winner_weights": winner["weights"],
+        "winner_mean_ic": winner["primary_ic"],
+        "baseline_weights": baseline,
+        "baseline_mean_ic": default_ic,
+        "candidates": results,
+    }
+    path = RESULTS_DIR / "bargain_tuning_results.json"
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return out
+
+
 def tune_bargain_weights(
     n_samples: int = 200,
     seed: int = 7,
@@ -390,85 +480,127 @@ def tune_bargain_weights(
     prices: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """
-    Tune bargain component weights by ranking on historical bargain_score vs forward return.
+    Legacy Dirichlet bargain search kept for CLI compatibility.
+
+    Prefer ``validate_bargain_weights`` — the primary path validates fixed
+    long-horizon weights instead of searching.
+    """
+    del n_samples, seed  # unused; validation path does not search
+    return validate_bargain_weights(panel=panel, prices=prices)
+
+
+def compare_named_candidates(
+    panel: pd.DataFrame | None = None,
+    prices: pd.DataFrame | None = None,
+    composite_min: float = 50.0,
+    bargain_min: float = 50.0,
+    top_n: int = DCA_TOP_N,
+) -> dict[str, Any]:
+    """
+    Compare evidence-based / legacy-tuned / equal weights on gated DCA + horizon ICs.
+
+    This is the primary evaluation path (validation, not weight search).
     """
     panel = panel if panel is not None else load_factor_panel()
-    from backtest.data.prices import load_prices
-    from backtest.engine import _forward_quarter_returns
+    prices = prices if prices is not None else load_prices()
+    quarter_end_prices = precompute_quarter_end_prices(panel, prices)
+    delisted = load_delisted_catalog()
+    multi = precompute_multi_horizon_returns(panel, prices)
+    folds = make_expanding_window_folds(panel["quarter_end"].unique())
+    if not folds:
+        # Fall back to contiguous k-folds if the series is short.
+        kfolds = make_quarter_folds(panel["quarter_end"].unique(), k_folds=5)
+        folds = [(fq, [fe]) for fq, fe in kfolds]
 
-    if prices is None:
-        prices = load_prices()
-    fwd = _forward_quarter_returns(panel, prices)
-    baseline = current_baseline_bargain_weights()
-    rng = np.random.default_rng(seed)
+    candidates = named_weight_candidates()
+    rows: list[dict[str, Any]] = []
 
-    # Map quarter_end → next quarter_end for forward-return look-up.
-    # precompute_forward_returns labels each return row with the quarter it ENDS
-    # at (next_q), so we must match bargain scores at qend with fwd returns at
-    # next_q — the same convention used by _compute_ic in engine.py.
-    qends_sorted = sorted(panel["quarter_end"].unique())
-    next_qend: dict = {q: qends_sorted[i + 1] for i, q in enumerate(qends_sorted[:-1])}
+    for name, weights in candidates.items():
+        logger.info("Evaluating weight candidate: %s", name)
+        scored = score_factor_panel(panel, weights)
+        horizon_ics = compute_horizon_ics(scored, multi, score_col="composite")
 
-    def score_with_weights(weights: dict[str, float]) -> float:
-        ics: list[float] = []
-        comp_cols = {
-            "margin_of_safety": "bargain_margin_of_safety",
-            "discount_52w": "bargain_discount_52w",
-            "rsi_oversold": "bargain_rsi_oversold",
-        }
-        for qend, grp in panel.groupby("quarter_end"):
-            if qend not in next_qend:
+        # Gated DCA picks: composite + bargain thresholds, top-N.
+        picks: dict[pd.Timestamp, list[str]] = {}
+        for qend, grp in scored.groupby("quarter_end"):
+            valid = grp.dropna(subset=["composite", "bargain_score"])
+            valid = valid[
+                (valid["composite"] >= composite_min) & (valid["bargain_score"] >= bargain_min)
+            ].nlargest(top_n, "composite")
+            picks[pd.Timestamp(qend)] = valid["ticker"].astype(str).tolist()
+
+        fold_excess: list[float] = []
+        for train_q, test_q in folds:
+            # Evaluate test window as a DCA campaign marked at the last test quarter.
+            if not test_q:
                 continue
-            scores = []
-            for _, row in grp.iterrows():
-                weighted = 0.0
-                avail = 0.0
-                for key, col in comp_cols.items():
-                    val = row.get(col)
-                    if val is None or (isinstance(val, float) and np.isnan(val)):
-                        continue
-                    w = weights.get(key, 0.0)
-                    weighted += float(val) * w
-                    avail += w
-                score = weighted / avail if avail > 0 else np.nan
-                scores.append({"ticker": row["ticker"], "bargain_score": score})
-            if not scores:
-                continue
-            s_df = pd.DataFrame(scores).dropna()
-            # Use forward returns at the NEXT quarter (not the current quarter).
-            f_df = fwd[fwd["quarter_end"] == next_qend[qend]]
-            merged = s_df.merge(f_df, on="ticker", how="inner")
-            if len(merged) < 10:
-                continue
-            # Manual Spearman (rank + Pearson) — avoids scipy dependency.
-            a = merged["bargain_score"].rank()
-            b = merged["fwd_return"].rank()
-            ic = float(np.corrcoef(a, b)[0, 1])
-            if not np.isnan(ic):
-                ics.append(ic)
-        return float(np.mean(ics)) if ics else 0.0
+            fold_end = test_q[-1] if isinstance(test_q, list) else test_q
+            test_list = test_q if isinstance(test_q, list) else [test_q]
+            ex = dca_fold_excess_roi(
+                picks,
+                quarter_end_prices,
+                test_list,
+                fold_end,
+                delisted=delisted,
+            )
+            if ex is not None:
+                fold_excess.append(ex)
 
-    baseline_ic = score_with_weights(baseline)
-    best_w = baseline
-    best_ic = baseline_ic
-    samples: list[dict[str, Any]] = []
+        ci = bootstrap_mean_ci(fold_excess)
+        rows.append(
+            {
+                "name": name,
+                "factor_weights": weights,
+                "horizon_ics": horizon_ics,
+                "primary_ic": horizon_ics.get(PRIMARY_EVAL_HORIZON, 0.0),
+                "fold_excess_roi": fold_excess,
+                "excess_mean": ci["mean"],
+                "excess_ci_low": ci["ci_low"],
+                "excess_ci_high": ci["ci_high"],
+                "frac_folds_positive": float(np.mean([e > 0 for e in fold_excess])) if fold_excess else 0.0,
+            }
+        )
 
-    for i in range(n_samples):
-        w = random_bargain_weights(rng)
-        ic = score_with_weights(w)
-        samples.append({"weights": w, "mean_ic": ic})
-        if ic > best_ic:
-            best_ic = ic
-            best_w = w
+    # Rank by mean excess; flag pairs whose CIs overlap as indistinguishable.
+    rows.sort(key=lambda r: (r["excess_mean"] if not np.isnan(r["excess_mean"]) else -np.inf), reverse=True)
+    winner = rows[0]
+    comparisons: list[dict[str, Any]] = []
+    for other in rows[1:]:
+        overlap = (
+            winner["excess_ci_low"] <= other["excess_ci_high"]
+            and other["excess_ci_low"] <= winner["excess_ci_high"]
+        )
+        comparisons.append(
+            {
+                "winner": winner["name"],
+                "challenger": other["name"],
+                "indistinguishable": bool(overlap),
+            }
+        )
 
-    out = {
-        "winner_weights": best_w,
-        "winner_mean_ic": best_ic,
-        "baseline_weights": baseline,
-        "baseline_mean_ic": baseline_ic,
-        "top_5": sorted(samples, key=lambda x: x["mean_ic"], reverse=True)[:5],
+    # Prefer evidence_based when indistinguishable from the statistical winner.
+    recommended = winner["name"]
+    evidence = next((r for r in rows if r["name"] == "evidence_based"), None)
+    if evidence is not None and recommended != "evidence_based":
+        overlap = (
+            winner["excess_ci_low"] <= evidence["excess_ci_high"]
+            and evidence["excess_ci_low"] <= winner["excess_ci_high"]
+        )
+        if overlap:
+            recommended = "evidence_based"
+
+    payload = {
+        "objective": "gated_dca_expanding_window_with_bootstrap",
+        "primary_horizon": PRIMARY_EVAL_HORIZON,
+        "composite_min": composite_min,
+        "bargain_min": bargain_min,
+        "top_n": top_n,
+        "candidates": rows,
+        "comparisons": comparisons,
+        "recommended": recommended,
+        "recommended_weights": next(r["factor_weights"] for r in rows if r["name"] == recommended),
     }
-    path = RESULTS_DIR / "bargain_tuning_results.json"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(out, indent=2), encoding="utf-8")
-    return out
+    CANDIDATE_COMPARISON_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    logger.info("Candidate comparison complete; recommended=%s", recommended)
+    return payload

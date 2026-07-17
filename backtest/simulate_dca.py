@@ -17,6 +17,7 @@ from backtest.constants import (
     DCA_TOP_N,
     DEFAULT_DELIST_RETURN,
     RESULTS_DIR,
+    TRANSACTION_COST_BPS,
 )
 from backtest.data.prices import (
     BENCHMARK_TICKER,
@@ -105,6 +106,7 @@ def _simulate_dca(
     bargain_min: float,
     strategy: str = "buy_and_hold",
     delist_return: float = DEFAULT_DELIST_RETURN,
+    transaction_cost_bps: float = TRANSACTION_COST_BPS,
 ) -> DCAResult:
     delisted = load_delisted_catalog()
     cash = 0.0
@@ -112,6 +114,7 @@ def _simulate_dca(
     invested = 0.0
     wealth_history: list[tuple[date, float]] = []
     log: list[dict[str, Any]] = []
+    cost_frac = transaction_cost_bps / 10_000.0
 
     qends = sorted(scored["quarter_end"].unique())
     for qend in qends:
@@ -126,7 +129,7 @@ def _simulate_dca(
                     if px is None and ticker in delisted:
                         px = pos["cost_basis"] * (1 + delist_return)
                     if px:
-                        cash += pos["shares"] * px
+                        cash += pos["shares"] * px * (1.0 - cost_frac)
                     del positions[ticker]
 
         if picks:
@@ -137,14 +140,15 @@ def _simulate_dca(
                 px = price_on_or_before(prices, ticker, qdate)
                 if px is None or px <= 0:
                     continue
-                shares = per_stock / px
+                effective_px = px * (1.0 + cost_frac)
+                shares = per_stock / effective_px
                 if ticker in positions:
                     old = positions[ticker]
                     total_shares = old["shares"] + shares
-                    avg_cost = (old["cost_basis"] * old["shares"] + px * shares) / total_shares
+                    avg_cost = (old["cost_basis"] * old["shares"] + effective_px * shares) / total_shares
                     positions[ticker] = {"shares": total_shares, "cost_basis": avg_cost}
                 else:
-                    positions[ticker] = {"shares": shares, "cost_basis": px}
+                    positions[ticker] = {"shares": shares, "cost_basis": effective_px}
                 bought.append(ticker)
             log.append({"quarter_end": str(qdate), "bought": bought, "invested": DCA_INVESTMENT_USD})
 
@@ -162,19 +166,26 @@ def _simulate_dca(
     return _finalize_dca_result(strategy, wealth_history, invested, log)
 
 
-def _spy_dca_benchmark(prices: pd.DataFrame, quarter_ends: list) -> DCAResult:
+def _spy_dca_benchmark(
+    prices: pd.DataFrame,
+    quarter_ends: list,
+    transaction_cost_bps: float = TRANSACTION_COST_BPS,
+) -> DCAResult:
     """Invest $20k/quarter into SPY on the same schedule as the stock strategies."""
     prices = ensure_benchmark_prices(prices, BENCHMARK_TICKER)
     cash_shares = 0.0
     invested = 0.0
     wealth_history: list[tuple[date, float]] = []
     log: list[dict[str, Any]] = []
+    cost_frac = transaction_cost_bps / 10_000.0
 
     for qend in sorted(quarter_ends):
         qdate = pd.Timestamp(qend).date() if not isinstance(qend, date) else qend
         px = price_on_or_before(prices, BENCHMARK_TICKER, qdate)
         if px and px > 0:
-            cash_shares += DCA_INVESTMENT_USD / px
+            effective_px = px * (1.0 + cost_frac)
+            shares_added = DCA_INVESTMENT_USD / effective_px
+            cash_shares += shares_added
             invested += DCA_INVESTMENT_USD
             log.append(
                 {
@@ -182,7 +193,7 @@ def _spy_dca_benchmark(prices: pd.DataFrame, quarter_ends: list) -> DCAResult:
                     "bought": [BENCHMARK_TICKER],
                     "invested": DCA_INVESTMENT_USD,
                     "price": px,
-                    "shares_added": DCA_INVESTMENT_USD / px,
+                    "shares_added": shares_added,
                 }
             )
         mark_px = price_on_or_before(prices, BENCHMARK_TICKER, qdate) or px or 0.0
@@ -246,9 +257,14 @@ def run_dca_validation(
     delist_sensitivity = delist_sensitivity or [0.0, DEFAULT_DELIST_RETURN, -1.0]
     quarter_ends = sorted(panel["quarter_end"].unique())
 
+    # Score once per weight set; delist sensitivity only affects simulation.
+    logger.info("Scoring panel for old weights")
+    scored_old = score_factor_panel(panel, old_weights)
+    logger.info("Scoring panel for new weights")
+    scored_new = score_factor_panel(panel, new_weights)
+    spy = _spy_dca_benchmark(prices, quarter_ends)
+
     def run_all(delist_return: float) -> dict[str, Any]:
-        scored_old = score_factor_panel(panel, old_weights)
-        scored_new = score_factor_panel(panel, new_weights)
         old = _simulate_dca(
             scored_old,
             prices,
@@ -265,7 +281,6 @@ def run_dca_validation(
             "buy_and_hold",
             delist_return,
         )
-        spy = _spy_dca_benchmark(prices, quarter_ends)
         return {
             "delist_return": delist_return,
             "old_buy_hold": old,
@@ -276,7 +291,6 @@ def run_dca_validation(
     sensitivity = []
     for dr in delist_sensitivity:
         res = run_all(dr)
-        spy = res["spy"]
         old = res["old_buy_hold"]
         new = res["new_buy_hold"]
         sensitivity.append(
@@ -299,13 +313,13 @@ def run_dca_validation(
     base = run_all(DEFAULT_DELIST_RETURN)
     old = base["old_buy_hold"]
     new = base["new_buy_hold"]
-    spy = base["spy"]
 
     payload = {
         "simulation": {
             "investment_per_quarter_usd": DCA_INVESTMENT_USD,
             "top_n_stocks": DCA_TOP_N,
             "benchmark_ticker": BENCHMARK_TICKER,
+            "transaction_cost_bps": TRANSACTION_COST_BPS,
             "period_start": spy.period_start or old.period_start,
             "period_end": spy.period_end or old.period_end,
             "quarters_with_investment": spy.quarters_invested,

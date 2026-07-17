@@ -7,7 +7,7 @@ Empirical factor scoring and aggregated analyst recommendations for stocks, with
 - **Streamlit dashboard** — enter a ticker for factor scorecard, analyst consensus, price targets, and implied upside
 - **Extended factor set** — Value, Momentum (12-1), Quality, Low Volatility, Investment, Earnings Revisions, Piotroski F-Score
 - **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
-- **Bargain score** — absolute cheapness signal (margin of safety, drawdown, RSI, upside)
+- **Bargain score** — long-horizon cheapness (Graham margin of safety, valuation vs own 5y history, 52-week discount)
 - **ETF view** — basic fund info (no factor scoring)
 - **Weekly email** — Monday watchlist scorecard (composite, bargain, upside, Buy/Not Buy)
 - **Monthly email** — full S&P 500 scorecard (1st of each month)
@@ -33,13 +33,14 @@ Edit [`config.yaml`](config.yaml):
 
 | Section | Purpose |
 |---------|---------|
-| `thresholds` | Buy rules (composite, bargain, upside %, exclude sell) |
+| `thresholds` | Buy rules (composite, bargain, exclude sell; upside is informational) |
 | `factor_weights` | Weight each factor family in composite score |
-| `email` | SMTP settings (or use env vars / GitHub Secrets) |
+| `bargain_weights` | Long-horizon valuation bargain components |
+| `email` | SMTP settings (prefer env vars / GitHub Secrets for addresses) |
 
 **Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the weekly watchlist job.
 
-Default buy rule: `composite >= 50.9` AND `bargain >= 43.2` AND `implied_upside >= 15%` AND consensus is not Sell. These thresholds were calibrated by the backtest harness.
+Default buy rule: `composite >= 57.3` AND `bargain >= 49.4` AND consensus is not Sell. Analyst implied upside is shown for context but is not a hard gate. Thresholds were recalibrated on 3-year forward excess returns.
 
 ## Email alerts setup
 
@@ -146,51 +147,49 @@ config.yaml     # thresholds, weights, email
 data/           # universe_snapshot.parquet (refreshed by jobs)
 ```
 
-## Historical backtest (weight & threshold tuning)
+## Historical backtest (validation harness)
 
-The `backtest/` package tunes composite factor weights, bargain weights, and
+The `backtest/` package validates composite factor weights, bargain weights, and
 good-buy thresholds using SEC EDGAR point-in-time fundamentals and yfinance
 prices, covering historical S&P 500 constituents from 2010 to 2026.
 
-**How parameters are set:** factor weights are tuned with a k-fold
-time-series cross-validation that runs the actual DCA strategy — each quarter
-invest $20k equally across the top-5 composite-ranked stocks, hold until the
-end of the fold, and compare ROI on deployed capital against a same-schedule
-SPY DCA. Candidates are ranked by `mean(excess ROI across folds) − std(excess
-ROI)`, so the search explicitly rewards consistency across regimes rather than
-spiking in one period. The winner is only adopted if it is strictly more robust
-than the existing baseline. Good-buy thresholds are calibrated separately by
-bucketing composite/bargain scores against historical forward returns. Bargain
-weights are tuned by maximising the rank IC of the bargain score against
-next-quarter returns.
+**How parameters are set (buy-and-hold aligned):**
 
-Current factor weights reflect `sample_134`, the k-fold CV winner from a
-200-candidate search over 5 folds (2010–2026), which beat SPY on 4 of 5 folds
-including the 2023–26 period where the prior baseline lost −14%.
+- Factor weights use **evidence-based priors** (quality/value-led). The harness
+  compares a small set of named candidates (`evidence_based`, `legacy_tuned`,
+  `equal`) on gated DCA buy-and-hold performance with ~10 bps transaction costs
+  and bootstrap confidence intervals — it does **not** search for overfit weights.
+- Evaluation uses **1y / 3y / 5y** forward excess returns (plus next-quarter IC).
+- Scoring matches live: sector-adjusted z-scores when sector data is available.
+- Bargain weights (Graham margin of safety, valuation vs own history, 52w discount)
+  are validated via long-horizon rank IC.
+- Good-buy thresholds are calibrated on **3-year** forward excess-return buckets.
 
 ```bash
-# Full pipeline (slow: hours for complete SEC + price ingest)
+# Full validation pipeline (slow: hours for complete SEC + price ingest)
 python -m backtest.run pipeline
 
 # Individual steps
 python -m backtest.run ingest
 python -m backtest.run build-factors
-python -m backtest.run tune          # rolling win-rate objective (with walk-forward splits)
-python -m backtest.run tune-cv       # DCA k-fold CV objective (recommended)
-python -m backtest.run calibrate
+python -m backtest.run compare       # primary: named candidate comparison (recommended)
+python -m backtest.run calibrate     # thresholds on 3y forward excess
 python -m backtest.run dca
 python -m backtest.run report
-python -m backtest.run apply                  # apply default tune results
-python -m backtest.run apply --use-dca-cv     # apply k-fold CV winner (factor weights only)
+python -m backtest.run apply         # write validated weights/thresholds to config.yaml
+
+# Legacy search (kept available, not the source of truth)
+python -m backtest.run tune
+python -m backtest.run tune-cv
 ```
 
 Quick dev run (limited quarters/tickers):
 
 ```bash
-python -m backtest.run pipeline --max-edgar-quarters 8 --max-quarters 8 --max-tickers 80 --n-samples 30
+python -m backtest.run pipeline --max-edgar-quarters 8 --max-quarters 8 --max-tickers 80
 ```
 
-Results are written to `backtest/results/` (report, tuning JSON, DCA validation).
+Results are written to `backtest/results/` (report, comparison JSON, DCA validation).
 Cached data lives in `backtest/data/store/` (gitignored).
 
 ## Calibration (sample run, 30-ticker universe)
@@ -204,7 +203,7 @@ Spot-check results after building the snapshot:
 | JPM | Moderate value, strong momentum | ~31st value, ~93rd momentum |
 | AAPL | Balanced mega-cap | ~48 composite (below default 50 threshold) |
 
-NVDA shows high analyst upside (~40%) but composite below 50 due to weak value/low-vol scores — the default rule correctly avoids flagging it as a "good buy" on factors alone. Tune `thresholds` and `factor_weights` via the backtest harness or edit `config.yaml` directly.
+NVDA can show high analyst upside while still scoring poorly on value/quality — upside alone no longer forces a Buy. Validate `thresholds` and `factor_weights` via `python -m backtest.run compare` or edit `config.yaml` directly.
 
 To rebuild with more tickers for better cross-sections:
 

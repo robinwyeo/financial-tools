@@ -431,6 +431,16 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     debt_to_equity = normalize_debt_to_equity(_safe_float(info.get("debtToEquity")))
     current_ratio_info = _safe_float(info.get("currentRatio"))
 
+    # Current earnings yield (EBIT/EV). Valuation-vs-history percentile is computed
+    # lazily in the bargain path (not during universe snapshot builds).
+    current_ey = None
+    if ebit is not None:
+        ev_for_ey = enterprise_value
+        if ev_for_ey is None and market_cap is not None:
+            ev_for_ey = market_cap + (total_debt or 0.0) - (total_cash or 0.0)
+        if ev_for_ey is not None and ev_for_ey > 0:
+            current_ey = ebit / ev_for_ey
+
     # Analyst targets from info
     target_mean = _safe_float(info.get("targetMeanPrice"))
     target_low = _safe_float(info.get("targetLowPrice"))
@@ -511,6 +521,7 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "fifty_two_week_low": fifty_two_week_low,
         "all_time_high": all_time_high,
         "rsi_14": rsi_14,
+        "earnings_yield_current": current_ey,
         "exchange": exchange,
         "data_warnings": data_warnings,
     }
@@ -596,6 +607,150 @@ def _compute_drawdown_metrics(hist: pd.DataFrame) -> dict[str, float | None]:
         downside_dev = float(negative_returns.std() * np.sqrt(252))
 
     return {"max_drawdown": max_drawdown, "downside_deviation": downside_dev}
+
+
+def percentile_rank_in_history(
+    current: float | None,
+    history: list[float] | tuple[float, ...],
+) -> float | None:
+    """
+    Percentile rank of ``current`` within ``history`` (inclusive), scaled 0-100.
+
+    Higher current relative to history → higher score. For earnings yield this
+    means "cheap vs own history". Requires at least 4 historical observations.
+    """
+    if current is None or (isinstance(current, float) and np.isnan(current)):
+        return None
+    vals = [float(v) for v in history if v is not None and not (isinstance(v, float) and np.isnan(v))]
+    if len(vals) < 4:
+        return None
+    # Inclusive rank: fraction of history <= current.
+    n_le = sum(1 for v in vals if v <= current)
+    return float(n_le / len(vals) * 100.0)
+
+
+def fetch_quarterly_financials(ticker: str) -> dict[str, pd.DataFrame]:
+    """Fetch quarterly income / balance / cashflow (cached)."""
+    cache_path = _cache_key("qfin", ticker.upper())
+    cached = _read_cache(cache_path, max_age_hours=48)
+    if cached is not None:
+        return {k: _records_to_df(v) for k, v in cached.items()}
+
+    try:
+        t = yf.Ticker(ticker)
+        income = t.quarterly_financials if t.quarterly_financials is not None else pd.DataFrame()
+        balance = t.quarterly_balance_sheet if t.quarterly_balance_sheet is not None else pd.DataFrame()
+        cashflow = t.quarterly_cashflow if t.quarterly_cashflow is not None else pd.DataFrame()
+        result = {
+            "income": _df_to_records(income),
+            "balance": _df_to_records(balance),
+            "cashflow": _df_to_records(cashflow),
+        }
+        _write_cache(cache_path, result)
+        return {"income": income, "balance": balance, "cashflow": cashflow}
+    except Exception as exc:
+        logger.warning("Quarterly financials failed for %s: %s", ticker, exc)
+        return {"income": pd.DataFrame(), "balance": pd.DataFrame(), "cashflow": pd.DataFrame()}
+
+
+def _row_value_at(df: pd.DataFrame, names: list[str], col: Any) -> float | None:
+    if df is None or df.empty:
+        return None
+    for name in names:
+        if name not in df.index:
+            continue
+        if col not in df.columns:
+            continue
+        return _safe_float(df.loc[name, col])
+    return None
+
+
+def build_earnings_yield_history(
+    ticker: str,
+    *,
+    years: int = 5,
+) -> list[float]:
+    """
+    Build a trailing earnings-yield (EBIT/EV) series from quarterly statements.
+
+    For each quarter column, EV ≈ market_cap + debt − cash using the price on
+    or before the statement date and shares outstanding when available.
+    """
+    cache_path = _cache_key("eyhist", ticker.upper(), str(years))
+    cached = _read_cache(cache_path, max_age_hours=48)
+    if cached is not None and isinstance(cached.get("history"), list):
+        return [float(v) for v in cached["history"] if v is not None]
+
+    qfin = fetch_quarterly_financials(ticker)
+    income = qfin.get("income", pd.DataFrame())
+    balance = qfin.get("balance", pd.DataFrame())
+    if income.empty or balance.empty:
+        return []
+
+    hist = fetch_price_history(ticker, period="max")
+    if hist.empty or "Close" not in hist.columns:
+        return []
+    closes = hist["Close"].dropna().sort_index()
+
+    income_cols = _financial_columns_newest_first(income)
+    # Keep roughly years * 4 quarters.
+    max_periods = max(4, years * 4)
+    income_cols = income_cols[:max_periods]
+
+    history: list[float] = []
+    for col in income_cols:
+        ebit = _row_value_at(income, ["EBIT", "Operating Income"], col)
+        shares = _row_value_at(
+            balance,
+            ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"],
+            col,
+        )
+        total_debt = _row_value_at(
+            balance,
+            ["Total Debt", "Long Term Debt And Capital Lease Obligation", "Long Term Debt"],
+            col,
+        )
+        total_cash = _row_value_at(
+            balance,
+            ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", "Cash"],
+            col,
+        )
+        if ebit is None or shares is None or shares <= 0:
+            continue
+        try:
+            col_ts = pd.to_datetime(col)
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(col_ts):
+            continue
+        # Price on or before statement date.
+        eligible = closes[closes.index <= col_ts]
+        if eligible.empty:
+            continue
+        price = _safe_float(eligible.iloc[-1])
+        if price is None or price <= 0:
+            continue
+        market_cap = price * shares
+        enterprise_value = market_cap + (total_debt or 0.0) - (total_cash or 0.0)
+        if enterprise_value <= 0:
+            continue
+        history.append(float(ebit / enterprise_value))
+
+    # Chronological order (oldest → newest) for readability; percentile doesn't care.
+    history = list(reversed(history))
+    _write_cache(cache_path, {"history": history})
+    return history
+
+
+def compute_valuation_vs_history(
+    ticker: str,
+    current_earnings_yield: float | None,
+    *,
+    years: int = 5,
+) -> float | None:
+    """Current EY percentile within the stock's own trailing history (0-100)."""
+    history = build_earnings_yield_history(ticker, years=years)
+    return percentile_rank_in_history(current_earnings_yield, history)
 
 
 def throttle(seconds: float = 0.3) -> None:

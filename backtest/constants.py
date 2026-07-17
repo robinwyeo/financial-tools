@@ -32,18 +32,16 @@ BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
 # earnings_revisions requires live analyst rec history; excluded from historical tuning.
 EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset({"earnings_revisions"})
 
-# All three bargain components are reconstructable from EDGAR + price data.
+# Long-horizon valuation bargain components (RSI removed).
 BARGAIN_BACKTEST_COMPONENTS: tuple[str, ...] = (
     "margin_of_safety",
+    "valuation_vs_history",
     "discount_52w",
-    "rsi_oversold",
 )
 
-# No backtest bargain components are excluded (discount_ath and analyst_upside
-# were permanently removed from the bargain score, not merely excluded for backtest).
 EXCLUDED_BARGAIN_COMPONENTS: frozenset[str] = frozenset()
 
-# Themes = factor groups (1:1 mapping; tuning samples a Dirichlet over these).
+# Themes = factor groups (1:1 mapping; legacy Dirichlet search uses these).
 FACTOR_THEMES: dict[str, list[str]] = {
     "value": ["value"],
     "garp": ["garp"],
@@ -54,7 +52,6 @@ FACTOR_THEMES: dict[str, list[str]] = {
     "capital_discipline": ["capital_discipline"],
 }
 
-# Within-theme proportions: trivial (each theme has exactly one factor group).
 WITHIN_THEME_PROPORTIONS: dict[str, dict[str, float]] = {
     "value": {"value": 1.0},
     "garp": {"garp": 1.0},
@@ -65,17 +62,69 @@ WITHIN_THEME_PROPORTIONS: dict[str, dict[str, float]] = {
     "capital_discipline": {"capital_discipline": 1.0},
 }
 
-DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.2489,
-    "discount_52w": 0.0024,
-    "rsi_oversold": 0.7488,
+# Evidence-based priors for long-horizon buy-and-hold (research-backed).
+EVIDENCE_BASED_FACTOR_WEIGHTS: dict[str, float] = {
+    "quality": 0.25,
+    "value": 0.25,
+    "capital_discipline": 0.125,
+    "balance_sheet": 0.10,
+    "garp": 0.10,
+    "momentum": 0.075,
+    "low_volatility": 0.05,
+    "earnings_revisions": 0.05,
 }
+
+# Previous Dirichlet-tuned weights kept as a named comparison candidate.
+LEGACY_TUNED_FACTOR_WEIGHTS: dict[str, float] = {
+    "value": 0.0286,
+    "garp": 0.4131,
+    "quality": 0.1042,
+    "balance_sheet": 0.1365,
+    "momentum": 0.0688,
+    "low_volatility": 0.1321,
+    "capital_discipline": 0.0667,
+    "earnings_revisions": 0.0500,
+}
+
+EQUAL_FACTOR_WEIGHTS: dict[str, float] = {
+    family: 1.0 / 8.0
+    for family in (
+        "value",
+        "garp",
+        "quality",
+        "balance_sheet",
+        "momentum",
+        "low_volatility",
+        "capital_discipline",
+        "earnings_revisions",
+    )
+}
+
+DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
+    "margin_of_safety": 0.40,
+    "valuation_vs_history": 0.35,
+    "discount_52w": 0.25,
+}
+
+# Forward-return horizons in quarters (1y / 3y / 5y) plus next-quarter.
+FORWARD_HORIZON_QUARTERS: dict[str, int] = {
+    "1q": 1,
+    "1y": 4,
+    "3y": 12,
+    "5y": 20,
+}
+
+PRIMARY_EVAL_HORIZON = "3y"
 
 ROLLING_WINDOW_MONTHS = 36
 TOP_QUINTILE_FRAC = 0.20
 DCA_INVESTMENT_USD = 20_000.0
 DCA_TOP_N = 5
 DEFAULT_DELIST_RETURN = -0.50
+TRANSACTION_COST_BPS = 10.0  # ~10 bps per buy
+VALUATION_HISTORY_QUARTERS = 20  # 5 years of trailing EY history
+BOOTSTRAP_N = 1000
+BOOTSTRAP_CI = 0.95
 
 SEC_USER_AGENT = "financial-tools-backtest contact@example.com"
 

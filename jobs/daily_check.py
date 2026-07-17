@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.config import load_config
-from core.scoring import score_ticker
+from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe_df
 from core.universe import build_universe_snapshot, fetch_sp500_tickers, load_universe_snapshot
 from core.watchlist import load_watchlist
 from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email, smtp_config_status
@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 def score_tickers(tickers: list[str], config: dict, uni) -> list[dict]:
+    scored_universe = None
+    if uni is not None and not uni.empty:
+        try:
+            scored_universe = score_universe_df(uni, config)
+        except Exception as exc:
+            logger.warning("Failed to score universe snapshot for alignment: %s", exc)
+
     results = []
     for ticker in tickers:
         try:
@@ -29,6 +36,10 @@ def score_tickers(tickers: list[str], config: dict, uni) -> list[dict]:
             if result.get("is_etf"):
                 logger.info("%s: skipped (ETF)", ticker)
                 continue
+            if scored_universe is not None:
+                result = apply_universe_snapshot_scoring(
+                    result, scored_universe, ticker, config
+                )
             results.append(result)
             bargain = (result.get("bargain") or {}).get("score")
             upside = (result.get("analyst") or {}).get("implied_upside_pct")

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.config import load_config
-from core.scoring import score_ticker
+from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe_df
 from core.universe import build_universe_snapshot, fetch_sp500_tickers, load_universe_snapshot
 from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email, smtp_config_status
 
@@ -48,12 +48,16 @@ def run_weekly(
     tickers = uni["ticker"].astype(str).str.upper().tolist()
     logger.info("Scoring S&P 500 universe (%d tickers)", len(tickers))
 
+    scored_universe = score_universe_df(uni, config)
     results = []
     for i, ticker in enumerate(tickers, start=1):
         try:
             result = score_ticker(ticker, config, uni)
             if result.get("is_etf"):
                 continue
+            result = apply_universe_snapshot_scoring(
+                result, scored_universe, ticker, config
+            )
             results.append(result)
             if i % 25 == 0 or i == len(tickers):
                 buy_count = sum(1 for r in results if r.get("is_good_buy"))

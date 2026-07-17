@@ -66,8 +66,8 @@ FACTOR_LABELS = {
 
 BARGAIN_LABELS = {
     "margin_of_safety": "Margin of Safety (Graham)",
+    "valuation_vs_history": "Valuation vs Own 5y History",
     "discount_52w": "Discount to 52-Week High",
-    "rsi_oversold": "RSI Oversold",
 }
 
 SHORT_FACTOR_LABELS = {
@@ -874,10 +874,18 @@ def render_composite_card(
         bargain_score,
         bargain_label,
         bargain_color,
-        subtitle="Graham · 52W discount · RSI",
+        subtitle="Graham · vs own history · 52W discount",
         aria_label="Bargain score gauge",
         fill_color=bargain_color,
         max_width=GAUGE_MAX_WIDTH,
+    )
+
+    rsi = analysis.get("rsi_14")
+    rsi_note = (
+        f'<div style="text-align:center;color:#6b7280;font-size:0.8rem;margin-top:0.25rem;">'
+        f"RSI(14): {rsi:.0f} (timing only — not in bargain score)</div>"
+        if rsi is not None
+        else ""
     )
 
     with _card_shell(bordered):
@@ -891,6 +899,7 @@ def render_composite_card(
             '<div class="gauge-cell">'
             '<div class="gauge-title">Bargain Score</div>'
             + bargain_gauge
+            + rsi_note
             + "</div></div></div>",
             unsafe_allow_html=True,
         )
@@ -1367,8 +1376,7 @@ def render_stock_view(
     if analysis.get("is_good_buy"):
         st.success(
             f"Meets good-buy criteria (composite ≥ {thresholds['composite_min']}, "
-            f"upside ≥ {thresholds['implied_upside_min_pct']}%, "
-            f"bargain ≥ {thresholds.get('bargain_min', 50)})"
+            f"bargain ≥ {thresholds.get('bargain_min', 50)}, consensus not Sell)"
         )
 
     # Company header card
@@ -1440,14 +1448,16 @@ def main() -> None:
         st.markdown("**Good-buy criteria**")
         thresholds = get_thresholds(config)
         st.write(f"Composite ≥ {thresholds['composite_min']}")
-        st.write(f"Implied upside ≥ {thresholds['implied_upside_min_pct']}%")
         st.write(f"Bargain ≥ {thresholds.get('bargain_min', 50)}")
         if thresholds.get("exclude_sell_consensus"):
             st.write("Excludes sell-consensus names")
+        st.caption(
+            f"Analyst upside (info only; context ≥ {thresholds['implied_upside_min_pct']}%)"
+        )
         st.markdown("---")
         st.markdown("**Composite factor weights**")
         st.caption(
-            "Eight factor groups (DCA k-fold CV tuned). "
+            "Eight factor groups (evidence-based priors for buy-and-hold). "
             "Shown as a share of total; renormalized at runtime over groups with data."
         )
         factor_weights = get_factor_weights(config)

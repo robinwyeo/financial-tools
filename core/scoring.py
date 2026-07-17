@@ -9,17 +9,16 @@ import pandas as pd
 
 from core.analysts import aggregate_analyst_data
 from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
-from core.data import build_raw_metrics, is_etf
+from core.data import build_raw_metrics, compute_valuation_vs_history, is_etf
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
 from core.universe import load_universe_snapshot, snapshot_path
 from core.watchlist import load_watchlist
 
-# Default bargain component weights from historical IC tuning.
-# RSI oversold dominates (mean-reversion); discount_ath and analyst_upside removed.
+# Long-horizon valuation bargain weights (RSI removed; kept as informational only).
 BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.2489,
-    "discount_52w": 0.0024,
-    "rsi_oversold": 0.7488,
+    "margin_of_safety": 0.40,
+    "valuation_vs_history": 0.35,
+    "discount_52w": 0.25,
 }
 
 
@@ -34,35 +33,44 @@ def _linear_score(value: float, low: float, high: float) -> float:
 def compute_bargain_score(
     price: float | None,
     graham_ratio: float | None,
-    all_time_high: float | None,
     fifty_two_week_high: float | None,
-    rsi_14: float | None,
-    implied_upside_pct: float | None,
+    valuation_vs_history: float | None = None,
     component_weights: dict[str, float] | None = None,
+    *,
+    # Backward-compatible unused kwargs (removed from the score).
+    all_time_high: float | None = None,
+    rsi_14: float | None = None,
+    implied_upside_pct: float | None = None,
 ) -> dict[str, Any]:
     """
-    Absolute 0-100 bargain score from fixed thresholds (higher = more of a bargain).
+    Absolute 0-100 bargain score for long-horizon entry (higher = more of a bargain).
 
     Components:
-      margin_of_safety  — Graham ratio scored over [0.30, 1.30]; discriminates
-                          across the full S&P 500 distribution (median ~0.47).
-      discount_52w      — % below 52-week high; linear 0%→0, 30%→100.
-      rsi_oversold      — RSI 70→0, RSI 30→100 (linear(70-RSI, 0, 40)).
+      margin_of_safety       — Graham ratio scored over [0.30, 1.30].
+      valuation_vs_history   — current EBIT/EV percentile vs own 5y history (0-100).
+      discount_52w           — % below 52-week high; linear 0%→0, 30%→100.
 
+    RSI is intentionally excluded (short-horizon mean-reversion). Analyst upside
+    is informational on the dashboard, not part of this score.
     Renormalizes weights over components with available data.
-    analyst_upside and discount_ath are intentionally excluded: upside is a
-    standalone good-buy gate; ATH discount is 0.95-correlated with 52w discount.
     """
+    del all_time_high, rsi_14, implied_upside_pct  # retained only for call-site compat
+
     components: dict[str, float | None] = {
         "margin_of_safety": None,
+        "valuation_vs_history": None,
         "discount_52w": None,
-        "rsi_oversold": None,
     }
 
     if graham_ratio is not None and graham_ratio > 0:
-        # Spans [0.30, 1.30]: covers the full S&P 500 distribution without
-        # clamping 90%+ of stocks to zero as the old (graham_ratio - 1) did.
         components["margin_of_safety"] = _linear_score(graham_ratio, 0.30, 1.30)
+
+    if valuation_vs_history is not None and not (
+        isinstance(valuation_vs_history, float) and np.isnan(valuation_vs_history)
+    ):
+        components["valuation_vs_history"] = float(
+            max(0.0, min(100.0, valuation_vs_history))
+        )
 
     if (
         price is not None
@@ -72,9 +80,6 @@ def compute_bargain_score(
     ):
         discount_52w = 1.0 - (price / fifty_two_week_high)
         components["discount_52w"] = _linear_score(discount_52w, 0.0, 0.30)
-
-    if rsi_14 is not None:
-        components["rsi_oversold"] = _linear_score(70.0 - float(rsi_14), 0.0, 40.0)
 
     weights = component_weights or BARGAIN_COMPONENT_WEIGHTS
     weighted_sum = 0.0
@@ -97,18 +102,31 @@ def _bargain_fields(
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build bargain score and related fields for analysis dict."""
+    del analyst  # upside is informational; not used in bargain score
+    valuation_vs_history = raw.get("valuation_vs_history")
+    if valuation_vs_history is None:
+        current_ey = raw.get("earnings_yield_current")
+        if current_ey is None:
+            current_ey = factors.get("earnings_yield")
+        ticker = raw.get("ticker")
+        if ticker:
+            try:
+                valuation_vs_history = compute_valuation_vs_history(
+                    str(ticker), current_ey
+                )
+            except Exception:
+                valuation_vs_history = None
     bargain = compute_bargain_score(
         price=raw.get("price"),
         graham_ratio=factors.get("graham_ratio"),
-        all_time_high=raw.get("all_time_high"),
         fifty_two_week_high=raw.get("fifty_two_week_high"),
-        rsi_14=raw.get("rsi_14"),
-        implied_upside_pct=analyst.get("implied_upside_pct"),
+        valuation_vs_history=valuation_vs_history,
         component_weights=get_bargain_weights(config),
     )
     return {
         "all_time_high": raw.get("all_time_high"),
-        "rsi_14": raw.get("rsi_14"),
+        "rsi_14": raw.get("rsi_14"),  # informational timing indicator
+        "valuation_vs_history": valuation_vs_history,
         "bargain": bargain,
     }
 
@@ -517,16 +535,23 @@ def _evaluate_good_buy(
     *,
     bargain_score: float | None = None,
 ) -> bool:
+    """
+    Good-buy gate: composite + bargain (+ optional sell-consensus filter).
+
+    Analyst implied upside is informational by default. Set
+    ``require_implied_upside: true`` in config to restore the hard gate.
+    """
     composite_min = float(thresholds.get("composite_min", 50))
     bargain_min = float(thresholds.get("bargain_min", 50))
-    upside_min = float(thresholds.get("implied_upside_min_pct", 15))
     exclude_sell = bool(thresholds.get("exclude_sell_consensus", True))
+    require_upside = bool(thresholds.get("require_implied_upside", False))
+    upside_min = float(thresholds.get("implied_upside_min_pct", 15))
 
     if composite is None or composite < composite_min:
         return False
-    if implied_upside is None or implied_upside < upside_min:
-        return False
     if bargain_score is None or bargain_score < bargain_min:
+        return False
+    if require_upside and (implied_upside is None or implied_upside < upside_min):
         return False
     if exclude_sell and analyst.get("consensus_label") == "Sell":
         return False
@@ -538,10 +563,15 @@ def evaluate_watchlist(config: dict[str, Any] | None = None) -> list[dict[str, A
     cfg = config or load_config()
     watchlist = load_watchlist()
     uni = load_universe_snapshot()
+    scored_universe = score_universe_df(uni, cfg) if uni is not None and not uni.empty else None
     results = []
     for ticker in watchlist:
         try:
             analysis = score_ticker(ticker, cfg, uni)
+            if scored_universe is not None:
+                analysis = apply_universe_snapshot_scoring(
+                    analysis, scored_universe, ticker, cfg
+                )
             if analysis.get("is_good_buy"):
                 results.append(analysis)
         except Exception:

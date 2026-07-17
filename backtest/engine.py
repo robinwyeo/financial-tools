@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -13,11 +13,16 @@ from backtest.constants import (
     BACKTEST_END,
     BACKTEST_FACTOR_FAMILIES,
     BACKTEST_START,
+    BOOTSTRAP_CI,
+    BOOTSTRAP_N,
     DCA_INVESTMENT_USD,
     DEFAULT_DELIST_RETURN,
+    FORWARD_HORIZON_QUARTERS,
+    PRIMARY_EVAL_HORIZON,
     ROLLING_WINDOW_MONTHS,
     TOP_QUINTILE_FRAC,
     TRAIN_END,
+    TRANSACTION_COST_BPS,
     VALID_END,
 )
 from backtest.data.prices import BENCHMARK_TICKER, load_delisted_catalog, load_prices
@@ -26,6 +31,7 @@ from backtest.weights import normalize_backtest_weights
 from core.factors import FACTOR_SCORE_COLUMNS
 from core.scoring import (
     _composite_and_coverage,
+    _score_column,
     cross_sectional_zscore,
     winsorize,
     zscore_to_percentile,
@@ -33,6 +39,7 @@ from core.scoring import (
 
 # Shared caches reused across tuning iterations.
 _FORWARD_RETURNS: pd.DataFrame | None = None
+_MULTI_HORIZON_RETURNS: pd.DataFrame | None = None
 _MONTHLY_RETURNS: pd.DataFrame | None = None
 _QUARTER_END_PRICES: dict[tuple[pd.Timestamp, str], float] | None = None
 
@@ -50,20 +57,57 @@ class BacktestResult:
     benchmark_cagr: float
     period_start: date
     period_end: date
+    horizon_ics: dict[str, float] = field(default_factory=dict)
+
+
+_SECTOR_MAP: pd.Series | None = None
+
+
+def _load_sector_map() -> pd.Series | None:
+    """Cached ticker→sector map from the live universe snapshot."""
+    global _SECTOR_MAP
+    if _SECTOR_MAP is not None:
+        return _SECTOR_MAP if not _SECTOR_MAP.empty else None
+    try:
+        from core.universe import load_universe_snapshot
+
+        snap = load_universe_snapshot()
+    except Exception:
+        _SECTOR_MAP = pd.Series(dtype=object)
+        return None
+    if snap is None or snap.empty or "sector" not in snap.columns:
+        _SECTOR_MAP = pd.Series(dtype=object)
+        return None
+    _SECTOR_MAP = (
+        snap.assign(ticker=snap["ticker"].astype(str).str.upper())
+        .drop_duplicates("ticker")
+        .set_index("ticker")["sector"]
+    )
+    return _SECTOR_MAP
+
+
+def _attach_sector_if_missing(df: pd.DataFrame) -> pd.DataFrame:
+    """Attach sector from the live universe snapshot when the panel lacks it."""
+    if "sector" in df.columns and df["sector"].notna().any():
+        return df
+    sector_map = _load_sector_map()
+    if sector_map is None or sector_map.empty:
+        return df
+    out = df.copy()
+    out["sector"] = out["ticker"].astype(str).str.upper().map(sector_map)
+    return out
 
 
 def _score_panel_quarter(
     quarter_df: pd.DataFrame,
     factor_weights: dict[str, float],
+    *,
+    use_sector: bool = True,
 ) -> pd.DataFrame:
-    """Score one quarter cross-sectionally (universe-wide).
-
-    Mirrors core.scoring.score_universe_df: for each group, rank each
-    sub-signal, then average available sub-signal percentiles into a single
-    group percentile score. No sector adjustment in the backtest.
-    """
-    result = quarter_df.copy()
+    """Score one quarter cross-sectionally, matching live sector-adjusted scoring."""
+    result = quarter_df
     weights = normalize_backtest_weights(factor_weights)
+    group_col = "sector" if use_sector and "sector" in result.columns else None
 
     for family in BACKTEST_FACTOR_FAMILIES:
         cols = FACTOR_SCORE_COLUMNS.get(family, [])
@@ -71,7 +115,10 @@ def _score_panel_quarter(
         for col in cols:
             if col not in result.columns:
                 continue
-            z = cross_sectional_zscore(winsorize(result[col]))
+            if group_col:
+                z = _score_column(result, col, group_col)
+            else:
+                z = cross_sectional_zscore(winsorize(result[col]))
             sub_series.append(z.apply(zscore_to_percentile))
         if sub_series:
             result[f"pct_{family}"] = pd.concat(sub_series, axis=1).mean(axis=1, skipna=True)
@@ -89,11 +136,14 @@ def _score_panel_quarter(
 def score_factor_panel(
     panel: pd.DataFrame,
     factor_weights: dict[str, float],
+    *,
+    use_sector: bool = True,
 ) -> pd.DataFrame:
     """Score full factor panel quarter by quarter."""
+    panel = _attach_sector_if_missing(panel) if use_sector else panel
     frames = []
     for qend, grp in panel.groupby("quarter_end"):
-        frames.append(_score_panel_quarter(grp, factor_weights))
+        frames.append(_score_panel_quarter(grp, factor_weights, use_sector=use_sector))
     return pd.concat(frames, ignore_index=True)
 
 
@@ -106,12 +156,7 @@ def _top_quintile_tickers(scored_q: pd.DataFrame) -> list[str]:
 
 
 def _forward_month_ends(qend: date, n_months: int = 3) -> list[pd.Timestamp]:
-    """Month-end timestamps for the holding period following a quarter-end.
-
-    A quarter-end selection made on (e.g.) 2010-03-31 earns the monthly returns
-    labelled 2010-04-30, 2010-05-31, 2010-06-30 (the realized path until the next
-    rebalance), so we map the picks onto those forward months.
-    """
+    """Month-end timestamps for the holding period following a quarter-end."""
     base = pd.Timestamp(qend).to_period("M").to_timestamp("M")
     return [base + pd.offsets.MonthEnd(k) for k in range(1, n_months + 1)]
 
@@ -122,12 +167,7 @@ def _holdings_from_scored(
     end: date,
     holding_months: int = 3,
 ) -> dict[pd.Timestamp, list[str]]:
-    """Map each holding month to the top-quintile names picked at the prior quarter-end.
-
-    The top quintile selected at a quarter-end is held through the next
-    ``holding_months`` months, producing a monthly (not quarterly) return path so
-    that the rolling 36-month win-rate window can actually be filled.
-    """
+    """Map each holding month to the top-quintile names picked at the prior quarter-end."""
     holdings: dict[pd.Timestamp, list[str]] = {}
     for qend, grp in scored.groupby("quarter_end"):
         qdate = pd.Timestamp(qend).date() if not isinstance(qend, date) else qend
@@ -158,43 +198,103 @@ def precompute_monthly_returns(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def precompute_forward_returns(panel: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
-    """Quarter-over-quarter forward returns using last close on or before each quarter-end."""
+    """Next-quarter forward returns (legacy 1q horizon)."""
     global _FORWARD_RETURNS
     if _FORWARD_RETURNS is not None:
         return _FORWARD_RETURNS
-    tickers = panel["ticker"].astype(str).unique()
-    sub = prices[prices["ticker"].isin(tickers)].sort_values(["ticker", "Date"])
+    multi = precompute_multi_horizon_returns(panel, prices)
+    if multi.empty:
+        _FORWARD_RETURNS = pd.DataFrame(columns=["quarter_end", "ticker", "fwd_return"])
+        return _FORWARD_RETURNS
+    out = multi[["as_of_quarter", "ticker", "fwd_1q"]].rename(
+        columns={"as_of_quarter": "quarter_end", "fwd_1q": "fwd_return"}
+    )
+    # Match legacy labeling: return row tagged with the quarter it ENDS at.
     qends = sorted(panel["quarter_end"].unique())
-    rows: list[dict] = []
-    for i, qend in enumerate(qends[:-1]):
-        next_q = qends[i + 1]
-        q_ts = pd.Timestamp(qend)
-        n_ts = pd.Timestamp(next_q)
-        p0 = sub[sub["Date"] <= q_ts].groupby("ticker")["Close"].last()
-        p1 = sub[sub["Date"] <= n_ts].groupby("ticker")["Close"].last()
-        for ticker in p0.index.intersection(p1.index):
-            if p0[ticker] and p0[ticker] > 0:
-                rows.append(
-                    {
-                        "quarter_end": next_q,
-                        "ticker": ticker,
-                        "fwd_return": float(p1[ticker] / p0[ticker] - 1.0),
-                    }
-                )
-    _FORWARD_RETURNS = pd.DataFrame(rows)
+    next_map = {qends[i]: qends[i + 1] for i in range(len(qends) - 1)}
+    out = out.copy()
+    out["quarter_end"] = out["quarter_end"].map(next_map)
+    out = out.dropna(subset=["quarter_end", "fwd_return"])
+    _FORWARD_RETURNS = out
     return _FORWARD_RETURNS
+
+
+def precompute_multi_horizon_returns(
+    panel: pd.DataFrame,
+    prices: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Forward returns at 1q / 1y / 3y / 5y horizons, labeled by the selection quarter.
+
+    Columns: as_of_quarter, ticker, fwd_1q, fwd_1y, fwd_3y, fwd_5y,
+             excess_1q, excess_1y, excess_3y, excess_5y (vs SPY).
+    """
+    global _MULTI_HORIZON_RETURNS
+    if _MULTI_HORIZON_RETURNS is not None:
+        return _MULTI_HORIZON_RETURNS
+
+    tickers = panel["ticker"].astype(str).unique().tolist()
+    if BENCHMARK_TICKER not in tickers:
+        tickers = list(tickers) + [BENCHMARK_TICKER]
+    sub = prices[prices["ticker"].isin(tickers)].sort_values(["ticker", "Date"])
+    qends = sorted(pd.to_datetime(panel["quarter_end"].unique()))
+    q_arr = np.array([np.datetime64(q) for q in qends])
+
+    # Last close on/before each quarter-end per ticker.
+    px: dict[str, np.ndarray] = {}
+    for ticker, grp in sub.groupby("ticker"):
+        dates = grp["Date"].values.astype("datetime64[ns]")
+        closes = grp["Close"].values.astype(float)
+        idx = np.searchsorted(dates, q_arr, side="right") - 1
+        arr = np.full(len(qends), np.nan)
+        valid = idx >= 0
+        arr[valid] = closes[idx[valid]]
+        px[str(ticker)] = arr
+
+    spy = px.get(BENCHMARK_TICKER)
+    rows: list[dict] = []
+    for i, qend in enumerate(qends):
+        for ticker, arr in px.items():
+            if ticker == BENCHMARK_TICKER:
+                continue
+            p0 = arr[i]
+            if not (p0 and p0 > 0 and not np.isnan(p0)):
+                continue
+            row: dict[str, Any] = {
+                "as_of_quarter": pd.Timestamp(qend),
+                "ticker": ticker,
+            }
+            for name, n_q in FORWARD_HORIZON_QUARTERS.items():
+                j = i + n_q
+                col = f"fwd_{name}"
+                exc = f"excess_{name}"
+                if j >= len(qends):
+                    row[col] = np.nan
+                    row[exc] = np.nan
+                    continue
+                p1 = arr[j]
+                if not (p1 and p1 > 0 and not np.isnan(p1)):
+                    row[col] = np.nan
+                    row[exc] = np.nan
+                    continue
+                fwd = float(p1 / p0 - 1.0)
+                row[col] = fwd
+                if spy is not None and spy[i] > 0 and not np.isnan(spy[i]) and spy[j] > 0 and not np.isnan(spy[j]):
+                    spy_fwd = float(spy[j] / spy[i] - 1.0)
+                    row[exc] = fwd - spy_fwd
+                else:
+                    row[exc] = np.nan
+            rows.append(row)
+
+    _MULTI_HORIZON_RETURNS = pd.DataFrame(rows) if rows else pd.DataFrame()
+    return _MULTI_HORIZON_RETURNS
 
 
 def precompute_quarter_end_prices(
     panel: pd.DataFrame,
     prices: pd.DataFrame,
 ) -> dict[tuple[pd.Timestamp, str], float]:
-    """Last close on or before each quarter-end, per ticker (for DCA simulation).
-
-    Returns a dict keyed by ``(quarter_end_timestamp, ticker)`` so the DCA-CV
-    objective can look up buy/mark prices in O(1) instead of filtering the full
-    price panel on every quarter.
-    """
+    """Last close on or before each quarter-end, per ticker (for DCA simulation)."""
     global _QUARTER_END_PRICES
     if _QUARTER_END_PRICES is not None:
         return _QUARTER_END_PRICES
@@ -219,11 +319,7 @@ def make_quarter_folds(
     quarters,
     k_folds: int = 5,
 ) -> list[tuple[list[pd.Timestamp], pd.Timestamp]]:
-    """Split the quarter timeline into k contiguous folds.
-
-    Each fold is ``(quarters_in_fold, fold_end_quarter)``; the fold end is the
-    quarter at which a fold's DCA campaign is marked to market.
-    """
+    """Split the quarter timeline into k contiguous folds."""
     qs = [pd.Timestamp(q) for q in sorted(quarters)]
     folds: list[tuple[list[pd.Timestamp], pd.Timestamp]] = []
     for chunk in np.array_split(np.array(qs), k_folds):
@@ -231,6 +327,52 @@ def make_quarter_folds(
         if members:
             folds.append((members, members[-1]))
     return folds
+
+
+def make_expanding_window_folds(
+    quarters,
+    min_train_quarters: int = 20,
+) -> list[tuple[list[pd.Timestamp], list[pd.Timestamp]]]:
+    """Expanding-window walk-forward: train on [0..t), test on fold block."""
+    qs = [pd.Timestamp(q) for q in sorted(quarters)]
+    if len(qs) <= min_train_quarters + 4:
+        return []
+    # Evaluate on successive 8-quarter (2y) blocks after the min train window.
+    folds: list[tuple[list[pd.Timestamp], list[pd.Timestamp]]] = []
+    start = min_train_quarters
+    while start < len(qs):
+        end = min(start + 8, len(qs))
+        train = qs[:start]
+        test = qs[start:end]
+        if test:
+            folds.append((train, test))
+        start = end
+    return folds
+
+
+def bootstrap_mean_ci(
+    values: list[float] | np.ndarray,
+    *,
+    n_boot: int = BOOTSTRAP_N,
+    ci: float = BOOTSTRAP_CI,
+    seed: int = 42,
+) -> dict[str, float]:
+    """Bootstrap confidence interval for the mean of ``values``."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if arr.size == 0:
+        return {"mean": float("nan"), "ci_low": float("nan"), "ci_high": float("nan")}
+    rng = np.random.default_rng(seed)
+    means = np.empty(n_boot)
+    for i in range(n_boot):
+        sample = rng.choice(arr, size=arr.size, replace=True)
+        means[i] = sample.mean()
+    alpha = (1.0 - ci) / 2.0
+    return {
+        "mean": float(arr.mean()),
+        "ci_low": float(np.quantile(means, alpha)),
+        "ci_high": float(np.quantile(means, 1.0 - alpha)),
+    }
 
 
 def dca_fold_excess_roi(
@@ -241,14 +383,10 @@ def dca_fold_excess_roi(
     *,
     delisted: set[str],
     delist_return: float = DEFAULT_DELIST_RETURN,
+    transaction_cost_bps: float = TRANSACTION_COST_BPS,
 ) -> float | None:
-    """Excess ROI of a $20k/quarter top-N DCA campaign vs SPY within one fold.
-
-    Each quarter in the fold, $20k is split equally across that quarter's picks
-    and held (no rebalance) until ``fold_end``, where positions are marked. The
-    same schedule is run for SPY. Returns ``strategy_ROI - spy_ROI`` on deployed
-    capital, or ``None`` if no capital was deployed.
-    """
+    """Excess ROI of a $20k/quarter gated DCA campaign vs SPY within one fold."""
+    cost_frac = transaction_cost_bps / 10_000.0
     positions: dict[str, dict[str, float]] = {}
     invested = 0.0
     for q in fold_quarters:
@@ -262,8 +400,10 @@ def dca_fold_excess_roi(
         invested += per_stock * len(priced)
         for t in priced:
             px = quarter_end_prices[(q, t)]
+            # Apply buy-side transaction cost by reducing shares purchased.
+            effective_px = px * (1.0 + cost_frac)
             pos = positions.setdefault(t, {"shares": 0.0, "cost": 0.0})
-            pos["shares"] += per_stock / px
+            pos["shares"] += per_stock / effective_px
             pos["cost"] += per_stock
     if invested <= 0:
         return None
@@ -275,7 +415,6 @@ def dca_fold_excess_roi(
             terminal += pos["shares"] * end_px
         elif t in delisted:
             terminal += pos["cost"] * (1.0 + delist_return)
-        # else: no terminal price and not flagged delisted -> treat as zero.
     strat_roi = terminal / invested - 1.0
 
     spy_shares = 0.0
@@ -283,7 +422,8 @@ def dca_fold_excess_roi(
     for q in fold_quarters:
         px = quarter_end_prices.get((q, BENCHMARK_TICKER))
         if px and px > 0:
-            spy_shares += DCA_INVESTMENT_USD / px
+            effective_px = px * (1.0 + cost_frac)
+            spy_shares += DCA_INVESTMENT_USD / effective_px
             spy_invested += DCA_INVESTMENT_USD
     spy_end = quarter_end_prices.get((fold_end, BENCHMARK_TICKER))
     if spy_invested <= 0 or not spy_end:
@@ -298,14 +438,16 @@ def init_backtest_cache(
     prices: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load panel/prices and warm monthly + forward return caches."""
-    global _FORWARD_RETURNS, _MONTHLY_RETURNS, _QUARTER_END_PRICES
+    global _FORWARD_RETURNS, _MONTHLY_RETURNS, _QUARTER_END_PRICES, _MULTI_HORIZON_RETURNS
     _FORWARD_RETURNS = None
     _MONTHLY_RETURNS = None
     _QUARTER_END_PRICES = None
+    _MULTI_HORIZON_RETURNS = None
     panel = panel if panel is not None else load_factor_panel()
     prices = prices if prices is not None else load_prices()
     monthly = precompute_monthly_returns(prices)
     forward = precompute_forward_returns(panel, prices)
+    precompute_multi_horizon_returns(panel, prices)
     return panel, monthly, forward
 
 
@@ -356,6 +498,15 @@ def _benchmark_monthly_returns_from_cache(
     return sub.set_index("month")["return"].sort_index()
 
 
+def _spearman_ic(a: pd.Series, b: pd.Series) -> float | None:
+    if len(a) < 10:
+        return None
+    ra = a.rank()
+    rb = b.rank()
+    ic = float(np.corrcoef(ra, rb)[0, 1])
+    return None if np.isnan(ic) else ic
+
+
 def _compute_ic(scored: pd.DataFrame, forward_returns: pd.DataFrame) -> float:
     """Mean Spearman IC between composite and next-quarter return."""
     ics: list[float] = []
@@ -365,15 +516,37 @@ def _compute_ic(scored: pd.DataFrame, forward_returns: pd.DataFrame) -> float:
         q_df = scored[scored["quarter_end"] == qend][["ticker", "composite"]].dropna()
         fwd = forward_returns[forward_returns["quarter_end"] == next_q][["ticker", "fwd_return"]]
         merged = q_df.merge(fwd, on="ticker", how="inner")
-        if len(merged) < 10:
-            continue
-        # Manual Spearman (rank + Pearson) — avoids scipy dependency.
-        a = merged["composite"].rank()
-        b = merged["fwd_return"].rank()
-        ic = float(np.corrcoef(a, b)[0, 1])
-        if not np.isnan(ic):
+        ic = _spearman_ic(merged["composite"], merged["fwd_return"])
+        if ic is not None:
             ics.append(ic)
     return float(np.mean(ics)) if ics else 0.0
+
+
+def compute_horizon_ics(
+    scored: pd.DataFrame,
+    multi_horizon: pd.DataFrame,
+    score_col: str = "composite",
+) -> dict[str, float]:
+    """Mean Spearman IC of ``score_col`` vs each forward horizon."""
+    if multi_horizon is None or multi_horizon.empty:
+        return {}
+    out: dict[str, float] = {}
+    scored = scored.copy()
+    scored["as_of_quarter"] = pd.to_datetime(scored["quarter_end"])
+    for name in FORWARD_HORIZON_QUARTERS:
+        col = f"fwd_{name}"
+        if col not in multi_horizon.columns:
+            continue
+        ics: list[float] = []
+        for qend, grp in scored.groupby("as_of_quarter"):
+            s = grp[["ticker", score_col]].dropna()
+            fwd = multi_horizon[multi_horizon["as_of_quarter"] == qend][["ticker", col]].dropna()
+            merged = s.merge(fwd, on="ticker", how="inner")
+            ic = _spearman_ic(merged[score_col], merged[col])
+            if ic is not None:
+                ics.append(ic)
+        out[name] = float(np.mean(ics)) if ics else 0.0
+    return out
 
 
 def _forward_quarter_returns(panel: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
@@ -432,6 +605,7 @@ def run_backtest(
     monthly_returns: pd.DataFrame | None = None,
     forward_returns: pd.DataFrame | None = None,
     scored: pd.DataFrame | None = None,
+    use_sector: bool = True,
 ) -> BacktestResult:
     """Run quarterly top-quintile backtest for a weight configuration."""
     panel = panel if panel is not None else load_factor_panel()
@@ -439,19 +613,16 @@ def run_backtest(
         prices = prices if prices is not None else load_prices()
         monthly_returns = monthly_returns or precompute_monthly_returns(prices)
         forward_returns = forward_returns or precompute_forward_returns(panel, prices)
-    # Scoring is split-independent, so callers may pass a pre-scored panel to
-    # avoid re-scoring the full panel once per train/valid/test split.
     if scored is None:
-        scored = score_factor_panel(panel, factor_weights)
+        scored = score_factor_panel(panel, factor_weights, use_sector=use_sector)
     holdings = _holdings_from_scored(scored, start, end, holding_months)
 
-    # Benchmark must cover the portfolio's forward-held tail months so the rolling
-    # window is not truncated by an inner join against a shorter benchmark series.
     bench_end = (pd.Timestamp(end) + pd.offsets.MonthEnd(holding_months)).date()
     port_rets = _portfolio_monthly_returns_from_cache(holdings, monthly_returns, delist_return)
     bench_rets = _benchmark_monthly_returns_from_cache(monthly_returns, start, bench_end)
 
     win_rate, median_excess = _rolling_win_rate(port_rets, bench_rets)
+    horizon_ics: dict[str, float] = {}
     if skip_ic:
         mean_ic = 0.0
     else:
@@ -462,6 +633,10 @@ def run_backtest(
             & (pd.to_datetime(scored["quarter_end"]) <= end_ts)
         ]
         mean_ic = _compute_ic(scored_window, forward_returns)
+        if prices is not None or _MULTI_HORIZON_RETURNS is not None:
+            prices_for_h = prices if prices is not None else load_prices()
+            multi = precompute_multi_horizon_returns(panel, prices_for_h)
+            horizon_ics = compute_horizon_ics(scored_window, multi)
 
     return BacktestResult(
         factor_weights=normalize_backtest_weights(factor_weights),
@@ -475,6 +650,7 @@ def run_backtest(
         benchmark_cagr=_cagr(bench_rets),
         period_start=start,
         period_end=end,
+        horizon_ics=horizon_ics,
     )
 
 
@@ -490,4 +666,5 @@ def split_period(name: str) -> tuple[date, date]:
 
 def objective_tuple(result: BacktestResult) -> tuple[float, float, float]:
     """Higher is better: win rate, median excess, mean IC."""
-    return (result.rolling_win_rate, result.median_excess, result.mean_ic)
+    primary_ic = result.horizon_ics.get(PRIMARY_EVAL_HORIZON, result.mean_ic)
+    return (result.rolling_win_rate, result.median_excess, primary_ic)

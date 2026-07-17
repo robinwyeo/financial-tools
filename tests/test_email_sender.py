@@ -50,3 +50,4 @@ def test_format_scorecard_email_lists_buy_first():
     assert "Not Buy" in html
     assert "Composite" in html
     assert "Bargain" in html
+    assert "not a hard gate" in html

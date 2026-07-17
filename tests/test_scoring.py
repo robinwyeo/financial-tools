@@ -18,21 +18,27 @@ from core.scoring import (
 
 def _minimal_config() -> dict:
     weights = {family: 1.0 / len(FACTOR_SCORE_COLUMNS) for family in FACTOR_SCORE_COLUMNS}
-    return {"factor_weights": weights, "universe": {"sector_scoring": False}}
+    return {
+        "factor_weights": weights,
+        "universe": {"sector_scoring": False},
+        "thresholds": {
+            "composite_min": 50,
+            "bargain_min": 50,
+            "require_implied_upside": False,
+            "exclude_sell_consensus": True,
+        },
+    }
 
 
 def _minimal_df() -> pd.DataFrame:
     """Minimal universe dataframe with all sub-signal columns for the 8 factor groups."""
     base = {
         "sector": "Tech",
-        # value group
         "earnings_yield": 0.08,
         "fcf_yield": 0.06,
         "book_to_market": 0.3,
         "graham_ratio": 0.9,
-        # garp group
         "garp": 1.5,
-        # quality group
         "gross_profitability": 0.4,
         "roe": 0.15,
         "roa": 0.08,
@@ -40,24 +46,18 @@ def _minimal_df() -> pd.DataFrame:
         "roic": 0.18,
         "earnings_quality": 0.02,
         "financial_strength": 7.0,
-        # balance_sheet group
         "net_cash_to_mcap": -0.05,
         "low_leverage": 0.5,
         "altman_z": 3.5,
-        # momentum group
         "momentum_12_1": 0.15,
-        # low_volatility group
         "low_volatility": 8.0,
-        # capital_discipline group
         "shareholder_yield": 0.03,
         "investment": -0.05,
-        # earnings_revisions group
         "earnings_revisions": 1.0,
     }
     rows = []
     for i, ticker in enumerate(["AAA", "BBB", "CCC"]):
         row = {"ticker": ticker, **base}
-        # Vary some values so cross-sectional ranking is non-degenerate
         row["earnings_yield"] = base["earnings_yield"] * (1 + i * 0.1)
         row["momentum_12_1"] = base["momentum_12_1"] * (1 - i * 0.1)
         rows.append(row)
@@ -95,7 +95,6 @@ def test_score_universe_df_rank_averages_within_group():
     """The value group score should be the mean of sub-signal percentiles, not a raw average."""
     df = _minimal_df()
     scored = score_universe_df(df, _minimal_config(), group_col=None)
-    # All pct values should be in [0, 100]
     for family in FACTOR_SCORE_COLUMNS:
         col = f"pct_{family}"
         vals = scored[col].dropna()
@@ -106,10 +105,8 @@ def test_compute_bargain_score_high_when_discounted():
     result = compute_bargain_score(
         price=50.0,
         graham_ratio=1.5,
-        all_time_high=100.0,
         fifty_two_week_high=80.0,
-        rsi_14=25.0,
-        implied_upside_pct=30.0,
+        valuation_vs_history=90.0,
     )
     assert result["score"] is not None
     assert result["score"] >= 70
@@ -119,10 +116,8 @@ def test_compute_bargain_score_low_when_expensive():
     result = compute_bargain_score(
         price=95.0,
         graham_ratio=0.3,
-        all_time_high=100.0,
         fifty_two_week_high=98.0,
-        rsi_14=75.0,
-        implied_upside_pct=-5.0,
+        valuation_vs_history=10.0,
     )
     assert result["score"] is not None
     assert result["score"] < 40
@@ -133,43 +128,48 @@ def test_compute_bargain_score_renormalizes_partial_data():
     result = compute_bargain_score(
         price=50.0,
         graham_ratio=None,
-        all_time_high=100.0,  # ignored; discount_ath removed
         fifty_two_week_high=100.0,
-        rsi_14=None,
-        implied_upside_pct=None,
+        valuation_vs_history=None,
     )
     assert result["score"] is not None
     assert result["components"]["discount_52w"] is not None
     assert result["components"]["margin_of_safety"] is None
-    assert result["components"]["rsi_oversold"] is None
+    assert result["components"]["valuation_vs_history"] is None
     # discount_52w alone: 50% below 52w high → linear(0.5, 0, 0.30) = 100 (clamped)
     assert result["score"] == pytest.approx(100.0)
 
 
 def test_compute_bargain_score_three_components_only():
-    """Removed components (discount_ath, analyst_upside) must not appear."""
+    """RSI / ATH / analyst upside must not appear in bargain components."""
     result = compute_bargain_score(
-        price=60.0, graham_ratio=0.8, all_time_high=120.0,
-        fifty_two_week_high=100.0, rsi_14=40.0, implied_upside_pct=25.0,
+        price=60.0,
+        graham_ratio=0.8,
+        fifty_two_week_high=100.0,
+        valuation_vs_history=55.0,
+        rsi_14=40.0,
+        all_time_high=120.0,
+        implied_upside_pct=25.0,
     )
     assert "discount_ath" not in result["components"]
     assert "analyst_upside" not in result["components"]
-    assert set(result["components"].keys()) == {"margin_of_safety", "discount_52w", "rsi_oversold"}
+    assert "rsi_oversold" not in result["components"]
+    assert set(result["components"].keys()) == {
+        "margin_of_safety",
+        "valuation_vs_history",
+        "discount_52w",
+    }
 
 
 def test_compute_bargain_score_margin_of_safety_range():
     """Graham ratio should discriminate across the S&P 500 distribution [0.3, 1.3]."""
-    # Median S&P 500 graham_ratio ≈ 0.47 should produce a non-zero score
-    r_median = compute_bargain_score(None, 0.47, None, None, None, None)
+    r_median = compute_bargain_score(None, 0.47, None, None)
     assert r_median["components"]["margin_of_safety"] is not None
     assert r_median["components"]["margin_of_safety"] > 0
 
-    # ratio=0.30 → exactly 0 (floor)
-    r_low = compute_bargain_score(None, 0.30, None, None, None, None)
+    r_low = compute_bargain_score(None, 0.30, None, None)
     assert r_low["components"]["margin_of_safety"] == pytest.approx(0.0)
 
-    # ratio=1.30 → exactly 100 (ceiling)
-    r_high = compute_bargain_score(None, 1.30, None, None, None, None)
+    r_high = compute_bargain_score(None, 1.30, None, None)
     assert r_high["components"]["margin_of_safety"] == pytest.approx(100.0)
 
 
@@ -240,11 +240,13 @@ def test_apply_universe_snapshot_scoring_overrides_composite():
         "composite": 64.4,
         "factor_breakdown": {"garp": {"percentile": 62.0}},
         "analyst": {"implied_upside_pct": 13.0, "consensus_label": "Buy"},
-        "bargain": {"score": 44.0},
+        "bargain": {"score": 55.0},
     }
     updated = apply_universe_snapshot_scoring(analysis, scored, "COST", _minimal_config())
     assert updated["composite"] == pytest.approx(80.4)
     assert updated["factor_breakdown"]["garp"]["percentile"] == pytest.approx(97.6)
+    # Upside below 15% must not block good-buy when require_implied_upside is false.
+    assert updated["is_good_buy"] is True
 
 
 def test_score_ticker_survives_empty_quote_info(monkeypatch):
@@ -265,13 +267,13 @@ def test_score_ticker_survives_empty_quote_info(monkeypatch):
             "fifty_two_week_high": 220.0,
             "fifty_two_week_low": 150.0,
             "all_time_high": 230.0,
+            "valuation_vs_history": 60.0,
             "data_warnings": [],
             "recommendations": None,
             "target_mean": 240.0,
             "num_analysts": 40,
         }
 
-    # All sub-signal columns return None (simulates partial live fetch)
     all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
     monkeypatch.setattr("core.scoring.build_raw_metrics", fake_build)
     monkeypatch.setattr(
@@ -280,24 +282,38 @@ def test_score_ticker_survives_empty_quote_info(monkeypatch):
     )
 
     analysis = score_ticker("AMZN", _minimal_config(), universe_df=uni)
-    # Snapshot values should be used for sector/name
     assert analysis["sector"] == "Tech"
-    # factor_breakdown should have percentile entries for all groups
     for family in FACTOR_SCORE_COLUMNS:
         assert family in analysis["factor_breakdown"]
         assert "percentile" in analysis["factor_breakdown"][family]
 
 
-def test_evaluate_good_buy_requires_composite_upside_and_bargain():
+def test_evaluate_good_buy_requires_composite_and_bargain_not_upside():
     thresholds = {
         "composite_min": 50,
         "bargain_min": 50,
         "implied_upside_min_pct": 15,
+        "require_implied_upside": False,
         "exclude_sell_consensus": True,
     }
     analyst = {"consensus_label": "Buy"}
     assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=60) is True
     assert _evaluate_good_buy(49, 20, analyst, thresholds, bargain_score=60) is False
-    assert _evaluate_good_buy(55, 14, analyst, thresholds, bargain_score=60) is False
+    # Low upside no longer blocks.
+    assert _evaluate_good_buy(55, 5, analyst, thresholds, bargain_score=60) is True
+    assert _evaluate_good_buy(55, None, analyst, thresholds, bargain_score=60) is True
     assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=49) is False
     assert _evaluate_good_buy(55, 20, {"consensus_label": "Sell"}, thresholds, bargain_score=60) is False
+
+
+def test_evaluate_good_buy_optional_upside_gate():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "implied_upside_min_pct": 15,
+        "require_implied_upside": True,
+        "exclude_sell_consensus": True,
+    }
+    analyst = {"consensus_label": "Buy"}
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=60) is True
+    assert _evaluate_good_buy(55, 14, analyst, thresholds, bargain_score=60) is False

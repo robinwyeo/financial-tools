@@ -7,8 +7,11 @@ import numpy as np
 from backtest.constants import (
     BACKTEST_FACTOR_FAMILIES,
     DEFAULT_BARGAIN_WEIGHTS,
+    EQUAL_FACTOR_WEIGHTS,
+    EVIDENCE_BASED_FACTOR_WEIGHTS,
     EXCLUDED_COMPOSITE_FACTORS,
     FACTOR_THEMES,
+    LEGACY_TUNED_FACTOR_WEIGHTS,
     WITHIN_THEME_PROPORTIONS,
 )
 from core.config import get_factor_weights, load_config
@@ -16,11 +19,7 @@ from core.scoring import BARGAIN_COMPONENT_WEIGHTS
 
 
 def theme_weights_to_factor_weights(theme_weights: dict[str, float]) -> dict[str, float]:
-    """Expand theme-level weights into per-factor weights.
-
-    Since themes and factor groups are now 1:1, this is simply a pass-through
-    that normalises within-theme proportions (all equal to 1.0).
-    """
+    """Expand theme-level weights into per-factor weights."""
     out: dict[str, float] = {}
     for theme, factors in FACTOR_THEMES.items():
         theme_w = float(theme_weights.get(theme, 0.0))
@@ -53,6 +52,15 @@ def current_baseline_factor_weights() -> dict[str, float]:
     return normalize_backtest_weights(full)
 
 
+def named_weight_candidates() -> dict[str, dict[str, float]]:
+    """Named factor-weight candidates for validation (not search)."""
+    return {
+        "evidence_based": normalize_backtest_weights(EVIDENCE_BASED_FACTOR_WEIGHTS),
+        "legacy_tuned": normalize_backtest_weights(LEGACY_TUNED_FACTOR_WEIGHTS),
+        "equal": normalize_backtest_weights(EQUAL_FACTOR_WEIGHTS),
+    }
+
+
 def random_theme_weights(rng: np.random.Generator) -> dict[str, float]:
     themes = list(FACTOR_THEMES.keys())
     sample = rng.dirichlet(np.ones(len(themes)))
@@ -60,7 +68,7 @@ def random_theme_weights(rng: np.random.Generator) -> dict[str, float]:
 
 
 def normalize_bargain_weights(weights: dict[str, float]) -> dict[str, float]:
-    """Renormalize bargain weights over the three kept components."""
+    """Renormalize bargain weights over the active components."""
     kept = {k: float(weights.get(k, 0.0)) for k in DEFAULT_BARGAIN_WEIGHTS}
     total = sum(kept.values())
     if total <= 0:

@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from core.factors import FACTOR_SCORE_COLUMNS
+from core.fund_factors import FUND_FACTOR_SCORE_COLUMNS
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = ROOT / "config.yaml"
@@ -39,6 +40,29 @@ def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]
     return {
         family: float(weights.get(family, _DEFAULT_WEIGHTS.get(family, 0.0)))
         for family in FACTOR_SCORE_COLUMNS
+    }
+
+
+# Fund (ETF / mutual fund) composite priors: fees are the strongest documented
+# predictor of long-run relative fund performance, then realized risk-adjusted
+# returns; momentum and income are supporting signals.
+_DEFAULT_FUND_WEIGHTS: dict[str, float] = {
+    "cost": 0.25,
+    "performance": 0.20,
+    "risk_adjusted": 0.20,
+    "low_volatility": 0.15,
+    "momentum": 0.10,
+    "income": 0.10,
+}
+
+
+def get_fund_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
+    """Return fund factor-group weights from config for the fund composite groups."""
+    cfg = config or load_config()
+    weights = cfg.get("fund_factor_weights", {})
+    return {
+        family: float(weights.get(family, _DEFAULT_FUND_WEIGHTS.get(family, 0.0)))
+        for family in FUND_FACTOR_SCORE_COLUMNS
     }
 
 

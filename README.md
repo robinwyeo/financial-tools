@@ -1,6 +1,6 @@
-# Stock Metrics & Analyst Aggregation Tool
+# Stock & Fund Metrics Tool
 
-Empirical factor scoring and aggregated analyst recommendations for stocks, with weekly watchlist and monthly S&P 500 scorecard emails.
+Empirical factor scoring and aggregated analyst recommendations for stocks — plus fund-appropriate factor scoring for US and Canadian ETFs and mutual funds — with weekly watchlist and monthly S&P 500 scorecard emails.
 
 ## Features
 
@@ -8,7 +8,7 @@ Empirical factor scoring and aggregated analyst recommendations for stocks, with
 - **Extended factor set** — Value, Momentum (12-1), Quality, Low Volatility, Investment, Earnings Revisions, Piotroski F-Score
 - **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
 - **Bargain score** — long-horizon cheapness (Graham margin of safety, valuation vs own 5y history, 52-week discount)
-- **ETF view** — basic fund info (no factor scoring)
+- **Fund view (ETFs & mutual funds, US + Canada)** — full dashboard with a fund composite score, factor scorecard, radar, and price history, scored against a peer universe of well-known US and Canadian funds
 - **Weekly email** — Monday watchlist scorecard (composite, bargain, upside, Buy/Not Buy)
 - **Monthly email** — full S&P 500 scorecard (1st of each month)
 
@@ -23,9 +23,40 @@ pip install -r requirements.txt
 # Build initial universe snapshot (use --fast for ~50 tickers, or full S&P 500)
 python -m core.universe --fast --max 50
 
+# Build the fund universe snapshot (US + Canadian ETFs and mutual funds)
+python -m core.fund_universe
+
 # Launch dashboard
 streamlit run app.py
 ```
+
+## Fund scoring (ETFs & mutual funds)
+
+Stock factors depend on company financial statements and analyst coverage that
+do not exist for pooled funds, so funds are **not** squeezed into the stock
+model. Instead they get their own composite built from six fund factor groups,
+each ranked cross-sectionally against a curated peer universe of ~170 US and
+Canadian ETFs and mutual funds (within fund category when the category is
+large enough):
+
+| Group | Signal | Default weight |
+|-------|--------|----------------|
+| `cost` | Expense ratio (inverted — fees are the strongest predictor of relative fund performance) | 25% |
+| `performance` | 3y and 5y annualized total returns | 20% |
+| `risk_adjusted` | Trailing 1y return / annualized volatility (Sharpe-style) | 20% |
+| `low_volatility` | Inverse 12m volatility + max-drawdown protection | 15% |
+| `momentum` | 12-1 month return | 10% |
+| `income` | Distribution yield | 10% |
+
+Weights live under `fund_factor_weights` in `config.yaml`. Metrics that can't
+be converted from the stock model (Graham margin of safety, balance-sheet
+strength, analyst consensus) are intentionally excluded rather than
+approximated, and the coverage figure shows which groups had data.
+
+Canadian listings use Yahoo's `.TO` suffix (e.g. `XEQT.TO`, `VFV.TO`) and are
+displayed in C$. Canadian mutual funds are carried by Yahoo under
+Morningstar-style IDs (e.g. `0P0000A0F2.TO` for RBC Balanced D) — see
+`core/fund_universe.py` for the curated list of verified symbols.
 
 ## Configuration
 
@@ -35,6 +66,7 @@ Edit [`config.yaml`](config.yaml):
 |---------|---------|
 | `thresholds` | Buy rules (composite, bargain, exclude sell; upside is informational) |
 | `factor_weights` | Weight each factor family in composite score |
+| `fund_factor_weights` | Weight each fund factor group in the fund composite |
 | `bargain_weights` | Long-horizon valuation bargain components |
 | `email` | SMTP settings (prefer env vars / GitHub Secrets for addresses) |
 
@@ -98,7 +130,7 @@ When ready, omit `--no-email` to send the HTML scorecard to your inbox.
 | Workflow | Schedule | What it does |
 |----------|----------|--------------|
 | `.github/workflows/daily.yml` | Mondays 14:00 UTC | Watchlist scorecard email |
-| `.github/workflows/weekly.yml` | 1st of month 14:00 UTC | Full S&P 500 scorecard + snapshot refresh |
+| `.github/workflows/weekly.yml` | 1st of month 14:00 UTC | Full S&P 500 scorecard + stock and fund snapshot refresh |
 
 Adjust cron times in the workflow files for your timezone (14:00 UTC ≈ 7:00 AM Pacific).
 
@@ -117,7 +149,7 @@ Each email includes a table with **Composite**, **Bargain**, **Upside**, and **B
 
 1. Push repo to GitHub
 2. [share.streamlit.io](https://share.streamlit.io) → New app → select repo, main file `app.py`
-3. Ensure `data/universe_snapshot.parquet` is committed (monthly GHA job refreshes it)
+3. Ensure `data/universe_snapshot.parquet` and `data/fund_universe_snapshot.parquet` are committed (monthly GHA job refreshes them)
 
 ## Scheduled jobs
 
@@ -139,12 +171,12 @@ Options for both:
 ## Project structure
 
 ```
-core/           # data fetch, factors, scoring, analysts, universe
+core/           # data fetch, factors (stock + fund), scoring, analysts, universes
 app.py          # Streamlit dashboard
 jobs/           # daily_check.py, weekly_check.py, email_sender.py
 watchlist       # your watchlist (one ticker per line)
-config.yaml     # thresholds, weights, email
-data/           # universe_snapshot.parquet (refreshed by jobs)
+config.yaml     # thresholds, weights (stock + fund), email
+data/           # universe_snapshot.parquet + fund_universe_snapshot.parquet
 ```
 
 ## Historical backtest (validation harness)

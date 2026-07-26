@@ -56,5 +56,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/universe_snapshot.parquet || true
-          git diff --staged --quiet || git commit -m "chore: refresh universe snapshot (monthly) [skip ci]"
+          git add data/fund_universe_snapshot.parquet || true
+          git diff --staged --quiet || git commit -m "chore: refresh universe snapshots (monthly) [skip ci]"
           git push || true

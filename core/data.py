@@ -139,22 +139,34 @@ def prior_financial(col_names: list[str], df: pd.DataFrame) -> float | None:
     return prior
 
 
-def is_etf(ticker: str) -> bool:
-    """Return True if ticker appears to be an ETF."""
-    cache_path = _cache_key("etf", ticker.upper())
+FUND_QUOTE_TYPES = frozenset({"ETF", "MUTUALFUND"})
+
+
+def get_security_type(ticker: str) -> str:
+    """Return the Yahoo quote type, e.g. EQUITY, ETF, MUTUALFUND (cached)."""
+    cache_path = _cache_key("qtype", ticker.upper())
     cached = _read_cache(cache_path, max_age_hours=168)
     if cached is not None:
-        return bool(cached.get("is_etf"))
+        return str(cached.get("quote_type") or "EQUITY")
 
     try:
         info = yf.Ticker(ticker).info or {}
-        quote_type = (info.get("quoteType") or "").upper()
-        is_etf_flag = quote_type == "ETF"
-        _write_cache(cache_path, {"is_etf": is_etf_flag})
-        return is_etf_flag
+        quote_type = (info.get("quoteType") or "EQUITY").upper()
+        _write_cache(cache_path, {"quote_type": quote_type})
+        return quote_type
     except Exception as exc:
-        logger.warning("ETF check failed for %s: %s", ticker, exc)
-        return False
+        logger.warning("Quote type check failed for %s: %s", ticker, exc)
+        return "EQUITY"
+
+
+def is_etf(ticker: str) -> bool:
+    """Return True if ticker appears to be an ETF."""
+    return get_security_type(ticker) == "ETF"
+
+
+def is_fund(ticker: str) -> bool:
+    """Return True for pooled funds (ETFs and mutual funds)."""
+    return get_security_type(ticker) in FUND_QUOTE_TYPES
 
 
 def fetch_price_history(
@@ -315,23 +327,89 @@ def fetch_analyst_price_targets_openbb(ticker: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def fetch_etf_info(ticker: str) -> dict[str, Any]:
-    """Lightweight ETF metadata view."""
+def normalize_expense_ratio(info: dict[str, Any]) -> float | None:
+    """
+    Expense ratio as a decimal fraction (0.0009 = 0.09%).
+
+    Yahoo exposes two fields with different units: ``annualReportExpenseRatio``
+    is a fraction, while the newer ``netExpenseRatio`` is in percentage points.
+    """
+    frac = _safe_float(info.get("annualReportExpenseRatio"))
+    if frac is not None and frac > 0:
+        return frac
+    pct = _safe_float(info.get("netExpenseRatio"))
+    if pct is not None and pct > 0:
+        return pct / 100.0
+    return None
+
+
+def normalize_fund_yield(info: dict[str, Any]) -> float | None:
+    """
+    Distribution/dividend yield as a decimal fraction (0.013 = 1.3%).
+
+    ``yield`` is a fraction; newer ``dividendYield`` is in percentage points.
+    Values above 0.15 are assumed to be percentages (15%+ fund yields are
+    implausible as fractions in this universe).
+    """
+    val = _safe_float(info.get("yield"))
+    if val is None:
+        val = _safe_float(info.get("dividendYield"))
+        if val is not None and val > 0.15:
+            val = val / 100.0
+    elif val > 0.15:
+        val = val / 100.0
+    return val
+
+
+def _normalize_avg_return(val: float | None) -> float | None:
+    """Annualized return as fraction; values beyond ±1.5 are percentage points."""
+    if val is None:
+        return None
+    if abs(val) > 1.5:
+        return val / 100.0
+    return val
+
+
+def fetch_fund_info(ticker: str) -> dict[str, Any]:
+    """Metadata view for pooled funds (ETFs and mutual funds)."""
     info = fetch_ticker_info(ticker)
+    price = _safe_float(
+        info.get("currentPrice")
+        or info.get("regularMarketPrice")
+        or info.get("navPrice")
+        or info.get("previousClose")
+    )
     return {
         "symbol": ticker.upper(),
         "name": info.get("longName") or info.get("shortName"),
+        "quote_type": (info.get("quoteType") or "").upper(),
         "category": info.get("category"),
         "fund_family": info.get("fundFamily"),
-        "expense_ratio": info.get("annualReportExpenseRatio"),
-        "total_assets": info.get("totalAssets"),
-        "yield": info.get("yield") or info.get("dividendYield"),
-        "nav_price": info.get("navPrice"),
-        "current_price": info.get("currentPrice") or info.get("regularMarketPrice"),
-        "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-        "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+        "currency": (info.get("currency") or "USD").upper(),
+        "exchange": info.get("fullExchangeName") or info.get("exchange"),
+        "expense_ratio": normalize_expense_ratio(info),
+        "total_assets": _safe_float(info.get("totalAssets")),
+        "yield": normalize_fund_yield(info),
+        "nav_price": _safe_float(info.get("navPrice")),
+        "current_price": price,
+        "ytd_return": _normalize_avg_return(_safe_float(info.get("ytdReturn"))),
+        "three_year_avg_return": _normalize_avg_return(
+            _safe_float(info.get("threeYearAverageReturn"))
+        ),
+        "five_year_avg_return": _normalize_avg_return(
+            _safe_float(info.get("fiveYearAverageReturn"))
+        ),
+        "beta_3y": _safe_float(info.get("beta3Year")),
+        "fund_inception": info.get("fundInceptionDate"),
+        "fifty_two_week_high": _safe_float(info.get("fiftyTwoWeekHigh")),
+        "fifty_two_week_low": _safe_float(info.get("fiftyTwoWeekLow")),
         "description": info.get("longBusinessSummary"),
     }
+
+
+def fetch_etf_info(ticker: str) -> dict[str, Any]:
+    """Backward-compatible alias for :func:`fetch_fund_info`."""
+    return fetch_fund_info(ticker)
 
 
 def fetch_etf_holdings(ticker: str, top_n: int = 10) -> pd.DataFrame:
@@ -346,6 +424,97 @@ def fetch_etf_holdings(ticker: str, top_n: int = 10) -> pd.DataFrame:
     except Exception:
         pass
     return pd.DataFrame()
+
+
+def _compute_trailing_return(hist: pd.DataFrame, years: float) -> float | None:
+    """Annualized (CAGR) trailing return over ``years`` from daily closes."""
+    if hist.empty or "Close" not in hist.columns:
+        return None
+    closes = hist["Close"].dropna()
+    span = int(round(252 * years))
+    # Require at least ~90% of the window so young funds don't get inflated CAGRs.
+    if len(closes) < int(span * 0.9):
+        return None
+    start = _safe_float(closes.iloc[max(-len(closes), -span - 1)])
+    end = _safe_float(closes.iloc[-1])
+    if start is None or end is None or start <= 0 or end <= 0:
+        return None
+    total = end / start
+    if years <= 1:
+        return total - 1.0
+    return float(total ** (1.0 / years) - 1.0)
+
+
+def build_fund_raw_metrics(ticker: str) -> dict[str, Any]:
+    """
+    Assemble raw inputs for fund (ETF / mutual fund) factor computation.
+
+    Uses fund metadata plus price/NAV history; company financial statements do
+    not exist for pooled funds, so no balance-sheet style metrics are attempted.
+    """
+    fund = fetch_fund_info(ticker)
+    hist = fetch_price_history(ticker, period="max")
+
+    price = fund.get("current_price")
+    if price is None and not hist.empty and "Close" in hist.columns:
+        price = _safe_float(hist["Close"].iloc[-1])
+
+    return_1y = _compute_trailing_return(hist, 1.0)
+    return_3y = _compute_trailing_return(hist, 3.0)
+    return_5y = _compute_trailing_return(hist, 5.0)
+    if return_3y is None:
+        return_3y = fund.get("three_year_avg_return")
+    if return_5y is None:
+        return_5y = fund.get("five_year_avg_return")
+
+    momentum_12_1 = _compute_momentum_12_1(hist)
+    volatility_12m = _compute_volatility_12m(hist)
+    drawdown_metrics = _compute_drawdown_metrics(hist)
+    rsi_14 = _compute_rsi(hist)
+
+    all_time_high = None
+    if not hist.empty and "Close" in hist.columns:
+        all_time_high = _safe_float(hist["Close"].max())
+
+    fifty_two_week_high = fund.get("fifty_two_week_high")
+    fifty_two_week_low = fund.get("fifty_two_week_low")
+    if not hist.empty and "Close" in hist.columns:
+        window = hist["Close"].dropna().tail(252)
+        if fifty_two_week_high is None and len(window) > 0:
+            fifty_two_week_high = _safe_float(window.max())
+        if fifty_two_week_low is None and len(window) > 0:
+            fifty_two_week_low = _safe_float(window.min())
+
+    return {
+        "ticker": ticker.upper(),
+        "name": fund.get("name") or ticker.upper(),
+        "quote_type": fund.get("quote_type"),
+        "category": fund.get("category"),
+        "fund_family": fund.get("fund_family"),
+        "currency": fund.get("currency"),
+        "exchange": fund.get("exchange"),
+        "price": price,
+        "nav_price": fund.get("nav_price"),
+        "expense_ratio": fund.get("expense_ratio"),
+        "total_assets": fund.get("total_assets"),
+        "distribution_yield": fund.get("yield"),
+        "beta_3y": fund.get("beta_3y"),
+        "fund_inception": fund.get("fund_inception"),
+        "ytd_return": fund.get("ytd_return"),
+        "return_1y": return_1y,
+        "return_3y": return_3y,
+        "return_5y": return_5y,
+        "momentum_12_1": momentum_12_1,
+        "volatility_12m": volatility_12m,
+        "max_drawdown": drawdown_metrics.get("max_drawdown"),
+        "downside_deviation": drawdown_metrics.get("downside_deviation"),
+        "rsi_14": rsi_14,
+        "fifty_two_week_high": fifty_two_week_high,
+        "fifty_two_week_low": fifty_two_week_low,
+        "all_time_high": all_time_high,
+        "description": fund.get("description"),
+        "price_history": hist,
+    }
 
 
 def build_raw_metrics(ticker: str) -> dict[str, Any]:

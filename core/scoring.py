@@ -8,9 +8,24 @@ import numpy as np
 import pandas as pd
 
 from core.analysts import aggregate_analyst_data
-from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
-from core.data import build_raw_metrics, compute_valuation_vs_history, is_etf
+from core.config import (
+    get_bargain_weights,
+    get_factor_weights,
+    get_fund_factor_weights,
+    get_thresholds,
+    load_config,
+)
+from core.data import (
+    build_fund_raw_metrics,
+    build_raw_metrics,
+    compute_valuation_vs_history,
+    get_security_type,
+    is_etf,
+    is_fund,
+)
 from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
+from core.fund_factors import FUND_FACTOR_SCORE_COLUMNS, compute_fund_factors
+from core.fund_universe import load_fund_universe_snapshot
 from core.universe import load_universe_snapshot, snapshot_path
 from core.watchlist import load_watchlist
 
@@ -191,13 +206,15 @@ def zscore_to_percentile(z: float | None) -> float | None:
 def _composite_and_coverage(
     row: pd.Series,
     weights: dict[str, float],
+    factor_columns: dict[str, list[str]] | None = None,
 ) -> tuple[float | None, float]:
     """Weighted composite using only groups with data; returns (composite, coverage_pct)."""
+    families = factor_columns if factor_columns is not None else FACTOR_SCORE_COLUMNS
     weighted_sum = 0.0
     weight_available = 0.0
-    weight_total = sum(weights.get(family, 0) for family in FACTOR_SCORE_COLUMNS)
+    weight_total = sum(weights.get(family, 0) for family in families)
 
-    for family in FACTOR_SCORE_COLUMNS:
+    for family in families:
         pct_col = f"pct_{family}"
         if pct_col not in row.index:
             continue
@@ -303,6 +320,9 @@ def score_universe_df(
     factors_df: pd.DataFrame,
     config: dict[str, Any] | None = None,
     group_col: str | None = "sector",
+    *,
+    factor_columns: dict[str, list[str]] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """
     Score all tickers in a factors dataframe cross-sectionally.
@@ -311,14 +331,19 @@ def score_universe_df(
     sector z-score → normal-CDF percentile), then average available sub-signal
     percentiles into a single group percentile score. Composite = weighted average
     of group scores over groups with data.
+
+    ``factor_columns``/``weights`` default to the stock factor groups; pass the
+    fund factor groups (and fund weights) to score a fund universe.
     """
     cfg = config or load_config()
-    weights = get_factor_weights(cfg)
+    families = factor_columns if factor_columns is not None else FACTOR_SCORE_COLUMNS
+    if weights is None:
+        weights = get_factor_weights(cfg)
     use_sector = cfg.get("universe", {}).get("sector_scoring", True) and group_col in factors_df.columns
 
     result = factors_df.copy()
 
-    for family, cols in FACTOR_SCORE_COLUMNS.items():
+    for family, cols in families.items():
         pct_col = f"pct_{family}"
         sub_series: list[pd.Series] = []
 
@@ -339,7 +364,7 @@ def score_universe_df(
     composites = []
     coverages = []
     for _, row in result.iterrows():
-        composite, coverage = _composite_and_coverage(row, weights)
+        composite, coverage = _composite_and_coverage(row, weights, families)
         composites.append(composite)
         coverages.append(coverage)
     result["composite"] = composites
@@ -360,8 +385,14 @@ def score_ticker(
     ticker = ticker.upper().strip()
     cfg = config or load_config()
 
-    if is_etf(ticker):
-        return {"ticker": ticker, "is_etf": True}
+    if is_fund(ticker):
+        # ETFs and mutual funds go through the fund pipeline (score_fund).
+        return {
+            "ticker": ticker,
+            "is_etf": True,
+            "is_fund": True,
+            "security_type": get_security_type(ticker),
+        }
 
     raw = build_raw_metrics(ticker)
     factors = compute_all_factors(raw)
@@ -445,6 +476,159 @@ def score_universe(config: dict[str, Any] | None = None) -> pd.DataFrame:
     if uni is None or uni.empty:
         return pd.DataFrame()
     return score_universe_df(uni, config)
+
+
+def score_fund_universe(config: dict[str, Any] | None = None) -> pd.DataFrame:
+    """Score the entire fund universe snapshot (US + Canadian ETFs and mutual funds)."""
+    uni = load_fund_universe_snapshot()
+    if uni is None or uni.empty:
+        return pd.DataFrame()
+    cfg = config or load_config()
+    return score_universe_df(
+        uni,
+        cfg,
+        group_col="category",
+        factor_columns=FUND_FACTOR_SCORE_COLUMNS,
+        weights=get_fund_factor_weights(cfg),
+    )
+
+
+def _fund_display_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    price = raw.get("price")
+    nav = raw.get("nav_price")
+    nav_premium = None
+    if price is not None and nav is not None and nav > 0:
+        nav_premium = (price / nav) - 1.0
+    return {
+        "ticker": raw.get("ticker"),
+        "name": raw.get("name"),
+        "security_type": raw.get("quote_type"),
+        "category": raw.get("category"),
+        "fund_family": raw.get("fund_family"),
+        "currency": raw.get("currency"),
+        "exchange": raw.get("exchange"),
+        "price": price,
+        "nav_price": nav,
+        "nav_premium": nav_premium,
+        "expense_ratio": raw.get("expense_ratio"),
+        "total_assets": raw.get("total_assets"),
+        "distribution_yield": raw.get("distribution_yield"),
+        "beta_3y": raw.get("beta_3y"),
+        "ytd_return": raw.get("ytd_return"),
+        "return_1y": raw.get("return_1y"),
+        "return_3y": raw.get("return_3y"),
+        "return_5y": raw.get("return_5y"),
+        "volatility_12m": raw.get("volatility_12m"),
+        "max_drawdown": raw.get("max_drawdown"),
+        "rsi_14": raw.get("rsi_14"),
+        "fifty_two_week_high": raw.get("fifty_two_week_high"),
+        "fifty_two_week_low": raw.get("fifty_two_week_low"),
+        "all_time_high": raw.get("all_time_high"),
+        "description": raw.get("description"),
+        "is_etf": raw.get("quote_type") == "ETF",
+        "is_fund": True,
+    }
+
+
+def score_fund(
+    ticker: str,
+    config: dict[str, Any] | None = None,
+    fund_universe_df: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """
+    Score an ETF or mutual fund against the fund universe snapshot.
+
+    Mirrors score_ticker but uses fund-appropriate factors (cost, performance,
+    risk-adjusted return, volatility, momentum, income). Stock metrics that
+    depend on company financials or analyst coverage are not computed.
+    """
+    ticker = ticker.upper().strip()
+    cfg = config or load_config()
+
+    raw = build_fund_raw_metrics(ticker)
+    factors = compute_fund_factors(raw)
+    analysis = _fund_display_fields(raw)
+    analysis["factors_raw"] = {
+        col: factors.get(col)
+        for cols in FUND_FACTOR_SCORE_COLUMNS.values()
+        for col in cols
+    }
+    analysis["factors_raw"]["expense_ratio"] = raw.get("expense_ratio")
+
+    uni = fund_universe_df if fund_universe_df is not None else load_fund_universe_snapshot()
+    if uni is None or uni.empty:
+        analysis.update(
+            {
+                "composite": None,
+                "factor_coverage_pct": 0.0,
+                "factor_breakdown": {
+                    family: {"percentile": None} for family in FUND_FACTOR_SCORE_COLUMNS
+                },
+                "warning": (
+                    "Fund universe snapshot missing. Run `python -m core.fund_universe` "
+                    "to build it."
+                ),
+            }
+        )
+        return analysis
+
+    row = {
+        "ticker": ticker,
+        "name": raw.get("name"),
+        "quote_type": raw.get("quote_type"),
+        "category": raw.get("category"),
+        "fund_family": raw.get("fund_family"),
+        "currency": raw.get("currency"),
+        **factors,
+    }
+    combined = uni[uni["ticker"].astype(str).str.upper() != ticker].copy()
+    combined = pd.concat([combined, pd.DataFrame([row])], ignore_index=True)
+
+    scored = score_universe_df(
+        combined,
+        cfg,
+        group_col="category",
+        factor_columns=FUND_FACTOR_SCORE_COLUMNS,
+        weights=get_fund_factor_weights(cfg),
+    )
+    scored_row = scored[scored["ticker"] == ticker].iloc[0].to_dict()
+
+    analysis["composite"] = scored_row.get("composite")
+    analysis["factor_coverage_pct"] = scored_row.get("factor_coverage_pct")
+    analysis["factor_breakdown"] = {
+        family: {"percentile": scored_row.get(f"pct_{family}")}
+        for family in FUND_FACTOR_SCORE_COLUMNS
+    }
+    analysis["scored_row"] = scored_row
+    return analysis
+
+
+def apply_fund_snapshot_scoring(
+    analysis: dict[str, Any],
+    scored_fund_universe: pd.DataFrame,
+    ticker: str,
+) -> dict[str, Any]:
+    """
+    Replace fund composite and factor percentiles with snapshot-universe scores
+    so the gauge matches the fund rankings table (mirrors the stock behavior).
+    """
+    ticker = ticker.upper().strip()
+    if scored_fund_universe is None or scored_fund_universe.empty:
+        return analysis
+
+    mask = scored_fund_universe["ticker"].astype(str).str.upper() == ticker
+    if not mask.any():
+        return analysis
+
+    snap_row = scored_fund_universe.loc[mask].iloc[0]
+    updated = {**analysis}
+    updated["composite"] = snap_row.get("composite")
+    updated["factor_coverage_pct"] = snap_row.get("factor_coverage_pct")
+    updated["factor_breakdown"] = {
+        family: {"percentile": snap_row.get(f"pct_{family}")}
+        for family in FUND_FACTOR_SCORE_COLUMNS
+    }
+    return updated
 
 
 def apply_universe_snapshot_scoring(

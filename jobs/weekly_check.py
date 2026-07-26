@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.config import load_config
+from core.fund_universe import build_fund_universe_snapshot
 from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe_df
 from core.universe import build_universe_snapshot, fetch_sp500_tickers, load_universe_snapshot
 from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email, smtp_config_status
@@ -39,6 +40,12 @@ def run_weekly(
         if max_tickers:
             tickers = tickers[:max_tickers]
         build_universe_snapshot(tickers=tickers)
+
+        logger.info("Refreshing fund universe snapshot (US + Canadian ETFs and mutual funds)")
+        try:
+            build_fund_universe_snapshot()
+        except Exception as exc:
+            logger.warning("Fund universe snapshot refresh failed: %s", exc)
 
     uni = load_universe_snapshot()
     if uni is None or uni.empty:

@@ -18,14 +18,34 @@ import streamlit.components.v1 as components
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from core.config import get_bargain_weights, get_factor_weights, get_thresholds, load_config
+from core.config import (
+    get_bargain_weights,
+    get_factor_weights,
+    get_fund_factor_weights,
+    get_thresholds,
+    load_config,
+)
 from core.factors import FACTOR_SCORE_COLUMNS
-from core.data import fetch_etf_holdings, fetch_etf_info, fetch_price_history, is_etf
-from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe
+from core.fund_factors import FUND_FACTOR_SCORE_COLUMNS
+from core.data import (
+    FUND_QUOTE_TYPES,
+    fetch_etf_holdings,
+    fetch_price_history,
+    get_security_type,
+)
+from core.fund_universe import load_fund_universe_snapshot
+from core.scoring import (
+    apply_fund_snapshot_scoring,
+    apply_universe_snapshot_scoring,
+    score_fund,
+    score_fund_universe,
+    score_ticker,
+    score_universe,
+)
 from core.universe import load_universe_snapshot
 
 st.set_page_config(
-    page_title="Stock Metrics Tool",
+    page_title="Stock & Fund Metrics Tool",
     page_icon="📊",
     layout="wide",
 )
@@ -113,6 +133,75 @@ FACTOR_COLORS = {
     "earnings_revisions": "#ec4899",
 }
 
+# ── Fund (ETF / mutual fund) factor display ──────────────────────────────────
+
+FUND_FACTOR_LABELS = {
+    "cost": "Low Cost (expense ratio)",
+    "performance": "Performance (3y · 5y annualized return)",
+    "risk_adjusted": "Risk-Adjusted Return (return / volatility)",
+    "low_volatility": "Low Volatility & Drawdown",
+    "momentum": "Momentum (12-1)",
+    "income": "Income (distribution yield)",
+}
+
+SHORT_FUND_FACTOR_LABELS = {
+    "cost": "Low Fees",
+    "performance": "Returns 3-5Y",
+    "risk_adjusted": "Risk-Adj. Return",
+    "low_volatility": "Low Volatility",
+    "momentum": "Momentum",
+    "income": "Yield",
+}
+
+RADAR_FUND_FACTOR_LABELS: dict[str, str] = {
+    "cost":           "Low Fees",
+    "performance":    "Returns",
+    "risk_adjusted":  "Risk-Adj.",
+    "low_volatility": "Low Vol",
+    "momentum":       "Momentum",
+    "income":         "Yield",
+}
+
+# Fund Factor Scorecard display: (group_label, accent_color, [factor_keys]).
+FUND_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("Fees & Income", "#14b8a6", ["cost", "income"]),
+    ("Performance", "#3b82f6", ["performance", "risk_adjusted"]),
+    ("Risk & Trend", "#f59e0b", ["low_volatility", "momentum"]),
+]
+
+FUND_FACTOR_HELP: dict[str, str] = {
+    "cost": (
+        "Expense ratio ranked against the fund universe, inverted so cheaper "
+        "funds score higher. Fees are the strongest documented predictor of "
+        "long-run relative fund performance."
+    ),
+    "performance": (
+        "Annualized 3-year and 5-year total returns (price/NAV based), each "
+        "ranked cross-sectionally vs peer funds then averaged."
+    ),
+    "risk_adjusted": (
+        "Sharpe-style ratio: trailing 12-month return divided by annualized "
+        "volatility. Higher = more return per unit of risk taken, vs peers."
+    ),
+    "low_volatility": (
+        "Inverse of annualized 12-month volatility plus max-drawdown "
+        "protection, each ranked then averaged. Calmer funds rank higher."
+    ),
+    "momentum": (
+        "Trailing 12-month return, skipping the most recent month to avoid "
+        "short-term reversals. Higher rank = stronger persistent uptrend."
+    ),
+    "income": (
+        "Trailing distribution/dividend yield ranked vs peer funds. Higher = "
+        "more income paid out per dollar invested."
+    ),
+}
+
+SECURITY_TYPE_BADGES = {
+    "ETF": "ETF",
+    "MUTUALFUND": "Mutual Fund",
+}
+
 METRIC_HELP = {
     "composite_score": (
         "Single number from 0–100 that blends how this stock ranks on 8 factor groups "
@@ -175,6 +264,25 @@ METRIC_HELP = {
     ),
     "etf_category": "Broad type of fund (e.g. large-cap equity, bond) from the provider's classification.",
     "etf_yield": "Income paid out by the fund, shown as an annual percent of price (dividends/distributions).",
+    "fund_composite": (
+        "Single number from 0–100 that blends how this fund ranks on 6 fund factor groups "
+        "(low fees, 3-5y performance, risk-adjusted return, low volatility, momentum, income) "
+        "vs a peer universe of well-known US and Canadian ETFs and mutual funds. Sub-signals "
+        "are ranked within fund category when the category is large enough. Stock metrics "
+        "like Graham value or balance-sheet strength don't exist for funds and are excluded."
+    ),
+    "fund_nav_premium": (
+        "How far the market price sits above (+) or below (−) the fund's net asset value. "
+        "Persistent premiums mean paying more than the underlying holdings are worth."
+    ),
+    "fund_aum": (
+        "Total net assets managed by the fund. Larger funds tend to be more liquid and less "
+        "likely to close, but size itself is not a performance signal."
+    ),
+    "fund_returns": (
+        "Annualized total returns computed from price/NAV history (1Y is a simple trailing "
+        "return; 3Y and 5Y are CAGRs). Shown in the fund's own trading currency."
+    ),
 }
 
 # Hover copy for Factor Scorecard: what the metric means and how it's built.
@@ -230,16 +338,27 @@ def ordinal(n: int) -> str:
     return f"{n}{['th', 'st', 'nd', 'rd'][min(n % 10, 3)]}"
 
 
-def fmt_large_number(n: float | None) -> str:
+def currency_symbol(currency: str | None) -> str:
+    """Display symbol for a trading currency (C$ distinguishes CAD from USD)."""
+    cur = (currency or "USD").upper()
+    if cur == "CAD":
+        return "C$"
+    if cur == "USD":
+        return "$"
+    return f"{cur} "
+
+
+def fmt_large_number(n: float | None, currency: str | None = None) -> str:
+    sym = currency_symbol(currency)
     if n is None:
         return "N/A"
     if n >= 1e12:
-        return f"${n / 1e12:.2f}T"
+        return f"{sym}{n / 1e12:.2f}T"
     if n >= 1e9:
-        return f"${n / 1e9:.1f}B"
+        return f"{sym}{n / 1e9:.1f}B"
     if n >= 1e6:
-        return f"${n / 1e6:.1f}M"
-    return f"${n:,.0f}"
+        return f"{sym}{n / 1e6:.1f}M"
+    return f"{sym}{n:,.0f}"
 
 
 def percentile_color(pct: float | None) -> str:
@@ -926,10 +1045,14 @@ def render_composite_card(
         )
 
 
-def _factor_label_html(factor_key: str, short_label: str) -> str:
+def _factor_label_html(
+    factor_key: str,
+    short_label: str,
+    help_texts: dict[str, str] | None = None,
+) -> str:
     """Metric name with hover tooltip (meaning + calculation)."""
     label_e = html.escape(short_label)
-    help_text = FACTOR_HELP.get(factor_key)
+    help_text = (help_texts if help_texts is not None else FACTOR_HELP).get(factor_key)
     if not help_text:
         return f'<div class="factor-label">{label_e}</div>'
 
@@ -946,6 +1069,8 @@ def _factor_group_html(
     accent: str,
     factor_keys: list[str],
     breakdown: dict,
+    labels: dict[str, str] | None = None,
+    help_texts: dict[str, str] | None = None,
 ) -> str:
     header = (
         f'<div style="font-size:0.58rem;font-weight:700;color:{accent};text-transform:uppercase;'
@@ -953,9 +1078,10 @@ def _factor_group_html(
         f'border-bottom:1px solid {accent}22;'
         f'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{group_label}</div>'
     )
+    label_map = labels if labels is not None else SHORT_FACTOR_LABELS
     rows = []
     for key in factor_keys:
-        short_label = SHORT_FACTOR_LABELS.get(key, key)
+        short_label = label_map.get(key, key)
         fb = breakdown.get(key, {})
         pct = fb.get("percentile")
         color = percentile_color(pct)
@@ -969,7 +1095,7 @@ def _factor_group_html(
         rows.append(
             f'<div class="factor-row">'
             f'<div class="factor-dot" style="background:{color};"></div>'
-            f"{_factor_label_html(key, short_label)}"
+            f"{_factor_label_html(key, short_label, help_texts)}"
             f'<div class="factor-bar-track">'
             f'<div class="factor-bar-fill" style="width:{bar_w:.0f}%;background:{color};"></div>'
             f"</div>"
@@ -979,18 +1105,27 @@ def _factor_group_html(
     return f'<div class="factor-scorecard-group">{header}{"".join(rows)}</div>'
 
 
-def render_factor_scorecard_card(analysis: dict, *, bordered: bool = True) -> None:
+def render_factor_scorecard_card(
+    analysis: dict,
+    *,
+    bordered: bool = True,
+    groups: list[tuple[str, str, list[str]]] | None = None,
+    labels: dict[str, str] | None = None,
+    help_texts: dict[str, str] | None = None,
+) -> None:
     breakdown = analysis.get("factor_breakdown", {})
+    group_list = groups if groups is not None else FACTOR_SCORECARD_GROUPS
+    split = (len(group_list) + 1) // 2
 
     with _card_shell(bordered):
-        # 2-column CSS grid: left = Valuation + Quality, right = Financial Health + Market
+        # 2-column CSS grid of factor groups.
         left_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown)
-            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[:2]
+            _factor_group_html(lbl, acc, keys, breakdown, labels, help_texts)
+            for lbl, acc, keys in group_list[:split]
         )
         right_html = "".join(
-            _factor_group_html(lbl, acc, keys, breakdown)
-            for lbl, acc, keys in FACTOR_SCORECARD_GROUPS[2:]
+            _factor_group_html(lbl, acc, keys, breakdown, labels, help_texts)
+            for lbl, acc, keys in group_list[split:]
         )
         st.markdown(
             '<div class="dashboard-card-body factor-scorecard-card">'
@@ -1060,7 +1195,13 @@ def _price_position_strip_html(analysis: dict) -> str:
     )
 
 
-def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
+def render_price_history_card(
+    analysis: dict,
+    *,
+    bordered: bool = True,
+    currency: str | None = None,
+    line_only: bool = False,
+) -> None:
     ticker = analysis.get("ticker", "")
     with _card_shell(bordered):
         st.markdown('<div class="dashboard-card-body price-history-card">', unsafe_allow_html=True)
@@ -1089,7 +1230,9 @@ def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
 
         fig = go.Figure()
 
-        if all(c in hist.columns for c in ["Open", "High", "Low", "Close"]):
+        # Mutual funds only publish daily NAV (Open == High == Low == Close),
+        # so candlesticks render as flat bars — use the line trace alone.
+        if not line_only and all(c in hist.columns for c in ["Open", "High", "Low", "Close"]):
             fig.add_trace(
                 go.Candlestick(
                     x=hist.index,
@@ -1140,7 +1283,7 @@ def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
                 gridcolor="#f3f4f6",
                 gridwidth=1,
                 tickfont=dict(size=10, color="#9ca3af"),
-                tickprefix="$",
+                tickprefix=currency_symbol(currency),
             ),
             hovermode="x unified",
         )
@@ -1258,8 +1401,15 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
                 st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
 
 
-def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = True) -> None:
+def render_factor_radar_card(
+    analysis: dict,
+    ticker: str,
+    *,
+    bordered: bool = True,
+    radar_labels: dict[str, str] | None = None,
+) -> None:
     breakdown = analysis.get("factor_breakdown", {})
+    label_map = radar_labels if radar_labels is not None else RADAR_FACTOR_LABELS
 
     with _card_shell(bordered):
         st.markdown(
@@ -1270,7 +1420,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
             unsafe_allow_html=True,
         )
 
-        families = list(RADAR_FACTOR_LABELS.keys())
+        families = list(label_map.keys())
         raw_vals = [breakdown.get(f, {}).get("percentile") for f in families]
         available = [
             float(v)
@@ -1282,7 +1432,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
             float(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else fill
             for v in raw_vals
         ]
-        theta_labels = [RADAR_FACTOR_LABELS[f] for f in families]
+        theta_labels = [label_map[f] for f in families]
 
         fig = go.Figure(
             go.Scatterpolar(
@@ -1317,60 +1467,272 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
 # Main views
 # ──────────────────────────────────────────────────────────────────────────────
 
-def render_etf_view(ticker: str) -> None:
-    info = fetch_etf_info(ticker)
-    with st.container(border=True):
-        st.subheader(f"{info.get('name') or ticker} (ETF)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(
-            "Price",
-            f"${info.get('current_price', 0):,.2f}" if info.get("current_price") else "N/A",
-            help=METRIC_HELP["etf_price"],
-        )
-        c2.metric(
-            "Expense Ratio",
-            f"{(info.get('expense_ratio') or 0)*100:.2f}%" if info.get("expense_ratio") else "N/A",
-            help=METRIC_HELP["etf_expense_ratio"],
-        )
-        c3.metric("Category", info.get("category") or "N/A", help=METRIC_HELP["etf_category"])
-        c4.metric(
-            "Yield",
-            f"{(info.get('yield') or 0)*100:.2f}%" if info.get("yield") else "N/A",
-            help=METRIC_HELP["etf_yield"],
+def render_fund_header(analysis: dict) -> None:
+    ticker = analysis.get("ticker", "")
+    name = analysis.get("name") or ticker
+    exchange = analysis.get("exchange") or ""
+    category = analysis.get("category") or ""
+    fund_family = analysis.get("fund_family") or ""
+    total_assets = analysis.get("total_assets")
+    price = analysis.get("price")
+    currency = analysis.get("currency")
+    badge = SECURITY_TYPE_BADGES.get(analysis.get("security_type") or "", "Fund")
+
+    ticker_e = html.escape(str(ticker))
+    name_e = html.escape(str(name))
+    exchange_e = html.escape(str(exchange)) if exchange else ""
+    sym = currency_symbol(currency)
+
+    price_html = (
+        f' <span style="font-size:1.25rem;font-weight:700;color:#1e3a5f;white-space:nowrap;">'
+        f"{sym}{price:,.2f}</span>"
+        if price
+        else ""
+    )
+    badge_html = (
+        f' <span style="font-size:0.62rem;font-weight:700;color:#0d9488;background:#ccfbf1;'
+        f'border-radius:999px;padding:0.14rem 0.55rem;vertical-align:middle;'
+        f'text-transform:uppercase;letter-spacing:0.05em;">{html.escape(badge)}</span>'
+    )
+    exchange_html = (
+        f' <span style="color:#d1d5db;">|</span> '
+        f'<span style="font-size:0.88rem;color:#9ca3af;">{exchange_e}</span>'
+        if exchange_e
+        else ""
+    )
+
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown(
+            f'<div style="padding:0.05rem 0 0.1rem;line-height:1.35;">'
+            f'<span style="font-size:1.55rem;font-weight:800;color:#1e3a5f;">{ticker_e}</span>'
+            f"{price_html}{badge_html}<br>"
+            f'<span style="font-size:0.82rem;color:#6b7280;">{name_e}</span>'
+            f"{exchange_html}"
+            f"</div>",
+            unsafe_allow_html=True,
         )
 
-    st.info("ETFs are excluded from empirical factor scoring. Showing basic fund info only.")
-
-    holdings = fetch_etf_holdings(ticker)
-    if not holdings.empty:
-        st.subheader("Top Holdings")
-        st.dataframe(holdings, use_container_width=True)
-
-    hist = fetch_price_history(ticker, period="1y")
-    if not hist.empty:
-        fig = go.Figure(
-            go.Scatter(
-                x=hist.index,
-                y=hist["Close"],
-                mode="lines",
-                line=dict(color="#14b8a6", width=2),
-                name="Price",
+    with right:
+        def _facet(label: str, value: str, bold: bool = False) -> str:
+            weight = "700" if bold else "500"
+            return (
+                f'<span style="display:inline-block;margin-left:1.25rem;">'
+                f'<span style="display:block;font-size:0.68rem;color:#9ca3af;font-weight:600;'
+                f'text-transform:uppercase;letter-spacing:0.06em;">{html.escape(label)}</span>'
+                f'<span style="display:block;font-size:0.88rem;color:#374151;font-weight:{weight};">'
+                f"{html.escape(value)}</span></span>"
             )
-        )
-        fig.update_layout(
-            title=f"{ticker} — 1Y Price",
-            height=280,
-            margin=dict(l=10, r=10, t=40, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            yaxis=dict(showgrid=True, gridcolor="#f3f4f6", tickprefix="$"),
-            xaxis=dict(showgrid=False),
-        )
-        _plotly_chart(fig, height=280)
 
-    if info.get("description"):
+        parts = []
+        if category:
+            parts.append(_facet("Category", str(category)))
+        if fund_family:
+            parts.append(_facet("Fund Family", str(fund_family)))
+        if total_assets:
+            parts.append(_facet("Net Assets", fmt_large_number(total_assets, currency), bold=True))
+        if parts:
+            st.markdown(
+                f'<div style="text-align:right;padding:0.15rem 0 0.25rem;">{"".join(parts)}</div>',
+                unsafe_allow_html=True,
+            )
+
+
+def render_fund_composite_card(
+    analysis: dict,
+    *,
+    bordered: bool = True,
+    snapshot_date: str | None = None,
+) -> None:
+    composite = analysis.get("composite")
+    comp_color = gauge_score_color(composite)
+    comp_label = gauge_score_label(composite)
+
+    date_label = _format_snapshot_date(snapshot_date)
+    subtitle = (
+        f"vs US + Canadian fund universe snapshot from {date_label}"
+        if date_label
+        else "vs US + Canadian fund universe"
+    )
+
+    gauge = _arc_gauge_html(
+        composite,
+        comp_label,
+        comp_color,
+        subtitle=subtitle,
+        aria_label="Fund composite score gauge",
+        fill_color=comp_color,
+        max_width="150px",
+    )
+    rsi = analysis.get("rsi_14")
+    rsi_note = (
+        f'<div style="text-align:center;color:#6b7280;font-size:0.8rem;margin-top:0.25rem;">'
+        f"RSI(14): {rsi:.0f} (timing only — not in composite)</div>"
+        if rsi is not None
+        else ""
+    )
+
+    with _card_shell(bordered):
+        st.markdown(
+            '<div class="dashboard-card-body composite-score-card">'
+            '<div class="composite-gauges-row">'
+            '<div class="gauge-cell">'
+            '<div class="gauge-title">Fund Composite Score</div>'
+            + gauge
+            + rsi_note
+            + "</div></div></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _fund_fact_pill(label: str, value: str, color: str = "#1e3a5f") -> str:
+    return (
+        f'<div class="analyst-target-pill">'
+        f'<div class="lbl">{html.escape(label)}</div>'
+        f'<div class="val" style="color:{color};">{html.escape(value)}</div>'
+        f"</div>"
+    )
+
+
+def render_fund_facts_card(analysis: dict, *, bordered: bool = True) -> None:
+    expense_ratio = analysis.get("expense_ratio")
+    dist_yield = analysis.get("distribution_yield")
+    nav_premium = analysis.get("nav_premium")
+    beta = analysis.get("beta_3y")
+
+    expense_txt = f"{expense_ratio * 100:.2f}%" if expense_ratio is not None else "N/A"
+    yield_txt = f"{dist_yield * 100:.2f}%" if dist_yield is not None else "N/A"
+
+    def _ret_pill(label: str, val: float | None) -> str:
+        if val is None:
+            return _fund_fact_pill(label, "—", "#9ca3af")
+        color = "#10b981" if val >= 0 else "#ef4444"
+        return _fund_fact_pill(label, f"{val * 100:+.1f}%", color)
+
+    nav_html = ""
+    if nav_premium is not None:
+        nav_color = "#10b981" if nav_premium <= 0 else "#ef4444"
+        nav_html = (
+            f'<div style="font-size:0.64rem;color:#374151;margin-top:0.3rem;">'
+            f'NAV premium/discount: <b style="color:{nav_color};">{nav_premium * 100:+.2f}%</b>'
+            f"</div>"
+        )
+    beta_html = (
+        f'<div style="font-size:0.64rem;color:#374151;margin-top:0.15rem;">'
+        f"Beta (3Y): <b>{beta:.2f}</b></div>"
+        if beta is not None
+        else ""
+    )
+
+    with _card_shell(bordered):
+        st.markdown(
+            f"""
+            <div class="dashboard-card-body analyst-consensus-card">
+            <div class="analyst-header-wrap">
+            <div style="font-size:0.88rem;font-weight:700;color:#1e3a5f;margin-bottom:0.25rem;">
+                Fund Facts</div>
+            <div class="analyst-targets">
+                {_fund_fact_pill("Expense", expense_txt)}
+                {_fund_fact_pill("Yield", yield_txt)}
+            </div>
+            <div style="font-size:0.58rem;font-weight:600;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:0.05em;margin-top:0.5rem;">Annualized returns</div>
+            <div class="analyst-targets" style="margin-top:0.2rem;">
+                {_ret_pill("1Y", analysis.get("return_1y"))}
+                {_ret_pill("3Y", analysis.get("return_3y"))}
+                {_ret_pill("5Y", analysis.get("return_5y"))}
+            </div>
+            {nav_html}
+            {beta_html}
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_fund_view(
+    ticker: str,
+    config: dict,
+    scored_fund_universe: pd.DataFrame | None = None,
+    snapshot_date: str | None = None,
+) -> None:
+    with st.spinner(f"Analyzing {ticker}…"):
+        analysis = score_fund(ticker, config)
+        if scored_fund_universe is not None and not scored_fund_universe.empty:
+            analysis = apply_fund_snapshot_scoring(analysis, scored_fund_universe, ticker)
+
+    if analysis.get("warning"):
+        st.warning(analysis["warning"])
+
+    currency = analysis.get("currency")
+    is_mutual_fund = analysis.get("security_type") == "MUTUALFUND"
+
+    # Fund header card
+    with st.container(border=True):
+        render_fund_header(analysis)
+
+    st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
+
+    # Row 1: Fund Composite | Fund Factor Scorecard
+    _dashboard_row_anchor(1)
+    row1_left, row1_right = st.columns([2.6, 4.7], gap="small", border=True)
+    with row1_left:
+        render_fund_composite_card(analysis, bordered=False, snapshot_date=snapshot_date)
+    with row1_right:
+        render_factor_scorecard_card(
+            analysis,
+            bordered=False,
+            groups=FUND_SCORECARD_GROUPS,
+            labels=SHORT_FUND_FACTOR_LABELS,
+            help_texts=FUND_FACTOR_HELP,
+        )
+
+    st.markdown("<div style='margin-top:0.35rem;'></div>", unsafe_allow_html=True)
+
+    # Row 2: Fund Facts | Price History | Fund Factor Radar
+    _dashboard_row_anchor(2)
+    row2_a, row2_b, row2_c = st.columns([2.2, 3.5, 1.8], gap="small", border=True)
+    with row2_a:
+        render_fund_facts_card(analysis, bordered=False)
+    with row2_b:
+        render_price_history_card(
+            analysis,
+            bordered=False,
+            currency=currency,
+            line_only=is_mutual_fund,
+        )
+    with row2_c:
+        render_factor_radar_card(
+            analysis,
+            ticker,
+            bordered=False,
+            radar_labels=RADAR_FUND_FACTOR_LABELS,
+        )
+
+    inject_equal_height_js()
+
+    st.caption(
+        "Funds are scored on fund-appropriate factors (fees, realized returns, "
+        "risk-adjusted return, volatility, momentum, income) against a peer universe "
+        "of US and Canadian ETFs and mutual funds. Stock metrics that rely on company "
+        "financials or analyst coverage — Graham margin of safety, balance-sheet "
+        "strength, analyst consensus — do not exist for funds and are intentionally "
+        "excluded rather than approximated."
+    )
+
+    if analysis.get("is_etf"):
+        holdings = fetch_etf_holdings(ticker)
+        if not holdings.empty:
+            with st.expander("Top holdings"):
+                st.dataframe(holdings, use_container_width=True, hide_index=True)
+
+    with st.expander("Raw factor values"):
+        st.json(analysis.get("factors_raw", {}))
+
+    if analysis.get("description"):
         with st.expander("Description"):
-            st.write(info["description"])
+            st.write(analysis["description"])
 
 
 def render_stock_view(
@@ -1453,9 +1815,85 @@ def render_universe_rankings(
     st.dataframe(top, use_container_width=True, hide_index=True)
 
 
+def render_fund_universe_rankings(
+    scored_fund_universe: pd.DataFrame | None = None,
+) -> None:
+    scored = scored_fund_universe
+    if scored is None or scored.empty or "composite" not in scored.columns:
+        st.warning(
+            "No fund universe snapshot found. Run `python -m core.fund_universe` to build one."
+        )
+        return
+
+    scored = scored.copy()
+    scored["composite"] = pd.to_numeric(scored["composite"], errors="coerce")
+    scored["type"] = (
+        scored.get("quote_type", pd.Series(dtype=str))
+        .map(SECURITY_TYPE_BADGES)
+        .fillna("Fund")
+    )
+    cols = [c for c in ["ticker", "name", "type", "category", "currency", "composite"] if c in scored.columns]
+    top = scored.nlargest(20, "composite")[cols]
+    st.markdown("### Top 20 Funds by Composite Score (US + Canada)")
+    st.dataframe(top, use_container_width=True, hide_index=True)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _render_stock_sidebar_sections(config: dict) -> None:
+    st.markdown("**Good-buy criteria**")
+    thresholds = get_thresholds(config)
+    st.write(f"Composite ≥ {thresholds['composite_min']}")
+    st.write(f"Bargain ≥ {thresholds.get('bargain_min', 50)}")
+    if thresholds.get("exclude_sell_consensus"):
+        st.write("Excludes sell-consensus names")
+    st.caption(
+        f"Analyst upside (info only; context ≥ {thresholds['implied_upside_min_pct']}%)"
+    )
+    st.markdown("---")
+    st.markdown("**Composite factor weights**")
+    st.caption(
+        "Eight factor groups (evidence-based priors for buy-and-hold). "
+        "Shown as a share of total; renormalized at runtime over groups with data."
+    )
+    factor_weights = get_factor_weights(config)
+    factor_total = sum(factor_weights.values()) or 1.0
+    for family in sorted(FACTOR_SCORE_COLUMNS, key=lambda f: factor_weights.get(f, 0.0), reverse=True):
+        weight = factor_weights.get(family, 0.0)
+        st.write(f"{FACTOR_LABELS.get(family, family)}: {weight / factor_total:.1%}")
+    st.markdown("---")
+    st.markdown("**Bargain score weights**")
+    bargain_weights = get_bargain_weights(config)
+    bargain_total = sum(bargain_weights.values()) or 1.0
+    for key in sorted(bargain_weights, key=lambda k: bargain_weights.get(k, 0.0), reverse=True):
+        weight = bargain_weights[key]
+        st.write(f"{BARGAIN_LABELS.get(key, key)}: {weight / bargain_total:.1%}")
+
+    snapshot = load_universe_snapshot()
+    if snapshot is not None and not snapshot.empty:
+        date = snapshot["snapshot_date"].iloc[0] if "snapshot_date" in snapshot.columns else "unknown"
+        st.caption(f"Universe: {len(snapshot)} tickers (snapshot: {date})")
+
+
+def _render_fund_sidebar_sections(config: dict) -> None:
+    st.markdown("**Fund composite weights**")
+    st.caption(
+        "Six fund factor groups (fees first — the strongest documented predictor "
+        "of relative fund performance). Renormalized at runtime over groups with data."
+    )
+    fund_weights = get_fund_factor_weights(config)
+    fund_total = sum(fund_weights.values()) or 1.0
+    for family in sorted(FUND_FACTOR_SCORE_COLUMNS, key=lambda f: fund_weights.get(f, 0.0), reverse=True):
+        weight = fund_weights.get(family, 0.0)
+        st.write(f"{FUND_FACTOR_LABELS.get(family, family)}: {weight / fund_total:.1%}")
+
+    snapshot = load_fund_universe_snapshot()
+    if snapshot is not None and not snapshot.empty:
+        date = snapshot["snapshot_date"].iloc[0] if "snapshot_date" in snapshot.columns else "unknown"
+        st.caption(f"Fund universe: {len(snapshot)} funds (snapshot: {date})")
+
 
 def main() -> None:
     inject_css()
@@ -1464,40 +1902,33 @@ def main() -> None:
     with st.sidebar:
         st.header("Settings")
         default_ticker = st.query_params.get("ticker", "AAPL")
-        ticker = st.text_input("Ticker", value=default_ticker).upper().strip()
+        ticker = st.text_input(
+            "Ticker",
+            value=default_ticker,
+            help="Stocks, ETFs, and mutual funds (US and Canadian; use .TO for TSX listings).",
+        ).upper().strip()
+        viewing_fund = bool(ticker) and get_security_type(ticker) in FUND_QUOTE_TYPES
         st.markdown("---")
-        st.markdown("**Good-buy criteria**")
-        thresholds = get_thresholds(config)
-        st.write(f"Composite ≥ {thresholds['composite_min']}")
-        st.write(f"Bargain ≥ {thresholds.get('bargain_min', 50)}")
-        if thresholds.get("exclude_sell_consensus"):
-            st.write("Excludes sell-consensus names")
-        st.caption(
-            f"Analyst upside (info only; context ≥ {thresholds['implied_upside_min_pct']}%)"
-        )
-        st.markdown("---")
-        st.markdown("**Composite factor weights**")
-        st.caption(
-            "Eight factor groups (evidence-based priors for buy-and-hold). "
-            "Shown as a share of total; renormalized at runtime over groups with data."
-        )
-        factor_weights = get_factor_weights(config)
-        factor_total = sum(factor_weights.values()) or 1.0
-        for family in sorted(FACTOR_SCORE_COLUMNS, key=lambda f: factor_weights.get(f, 0.0), reverse=True):
-            weight = factor_weights.get(family, 0.0)
-            st.write(f"{FACTOR_LABELS.get(family, family)}: {weight / factor_total:.1%}")
-        st.markdown("---")
-        st.markdown("**Bargain score weights**")
-        bargain_weights = get_bargain_weights(config)
-        bargain_total = sum(bargain_weights.values()) or 1.0
-        for key in sorted(bargain_weights, key=lambda k: bargain_weights.get(k, 0.0), reverse=True):
-            weight = bargain_weights[key]
-            st.write(f"{BARGAIN_LABELS.get(key, key)}: {weight / bargain_total:.1%}")
+        if viewing_fund:
+            _render_fund_sidebar_sections(config)
+        else:
+            _render_stock_sidebar_sections(config)
 
-        snapshot = load_universe_snapshot()
-        if snapshot is not None and not snapshot.empty:
-            date = snapshot["snapshot_date"].iloc[0] if "snapshot_date" in snapshot.columns else "unknown"
-            st.caption(f"Universe: {len(snapshot)} tickers (snapshot: {date})")
+    if viewing_fund:
+        fund_snapshot = load_fund_universe_snapshot()
+        fund_snapshot_date = None
+        if (
+            fund_snapshot is not None
+            and not fund_snapshot.empty
+            and "snapshot_date" in fund_snapshot.columns
+        ):
+            fund_snapshot_date = str(fund_snapshot["snapshot_date"].iloc[0])
+
+        scored_fund_universe = score_fund_universe(config)
+        render_fund_view(ticker, config, scored_fund_universe, fund_snapshot_date)
+        st.markdown("---")
+        render_fund_universe_rankings(scored_fund_universe)
+        return
 
     snapshot = load_universe_snapshot()
     snapshot_date = None
@@ -1507,15 +1938,12 @@ def main() -> None:
     scored_universe = score_universe(config)
 
     if not ticker:
-        st.markdown("## Stock Metrics Tool")
-        st.caption("Enter a ticker in the sidebar to get started.")
+        st.markdown("## Stock & Fund Metrics Tool")
+        st.caption("Enter a stock, ETF, or mutual fund ticker in the sidebar to get started.")
         render_universe_rankings(config, scored_universe)
         return
 
-    if is_etf(ticker):
-        render_etf_view(ticker)
-    else:
-        render_stock_view(ticker, config, scored_universe, snapshot_date)
+    render_stock_view(ticker, config, scored_universe, snapshot_date)
 
     st.markdown("---")
     render_universe_rankings(config, scored_universe)

@@ -16,6 +16,13 @@ factor_weights:
   low_volatility: 0.05
   capital_discipline: 0.125
   earnings_revisions: 0.05
+fund_factor_weights:
+  cost: 0.25
+  performance: 0.2
+  risk_adjusted: 0.2
+  low_volatility: 0.15
+  momentum: 0.1
+  income: 0.1
 bargain_weights:
   margin_of_safety: 0.4
   valuation_vs_history: 0.35

@@ -294,6 +294,27 @@ def _pct_below_high(price: float | None, high: float | None) -> float | None:
     return max(0.0, 1.0 - (price / high))
 
 
+def _plotly_chart(fig: go.Figure, *, height: int) -> None:
+    """Render a Plotly figure without Streamlit's PlotlyChart JS chunk.
+
+    Streamlit Community Cloud sometimes serves the SPA index.html for
+    ``/static/js/PlotlyChart.*.js``, which makes ``st.plotly_chart`` fail with
+    ``Failed to fetch dynamically imported module``. Embedding via components
+    loads Plotly from its CDN inside an iframe and avoids that path.
+    """
+    fig.update_layout(autosize=True, height=height)
+    chart_html = fig.to_html(
+        include_plotlyjs="cdn",
+        full_html=False,
+        config={"displayModeBar": False, "responsive": True},
+    )
+    components.html(
+        f'<div style="width:100%;height:{height}px;">{chart_html}</div>',
+        height=height,
+        scrolling=False,
+    )
+
+
 def consensus_style(label: str) -> tuple[str, str]:
     """Return (text_color, bg_color) for a consensus label."""
     lower = label.lower()
@@ -368,7 +389,7 @@ def inject_css() -> None:
         .composite-gauges-row {
             display: flex;
             gap: 0.45rem;
-            align-items: flex-end;
+            align-items: flex-start;
             justify-content: center;
             width: 100%;
             padding: 0.15rem 0 0.1rem;
@@ -1124,7 +1145,7 @@ def render_price_history_card(analysis: dict, *, bordered: bool = True) -> None:
             hovermode="x unified",
         )
         st.markdown('<div class="dashboard-chart-slot">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        _plotly_chart(fig, height=CHART_HEIGHT_PRICE)
         st.markdown(
             _price_position_strip_html(analysis) + "</div></div>",
             unsafe_allow_html=True,
@@ -1221,7 +1242,7 @@ def render_analyst_card(analysis: dict, *, bordered: bool = True) -> None:
 
         pie_fig = _analyst_recommendations_pie(analyst)
         if pie_fig is not None:
-            st.plotly_chart(pie_fig, use_container_width=True, config={"displayModeBar": False})
+            _plotly_chart(pie_fig, height=CHART_HEIGHT_ANALYST_PIE)
 
         analysts_html = (
             f'<div style="font-size:0.65rem;color:#9ca3af;text-align:center;margin-top:0.1rem;">'
@@ -1288,7 +1309,7 @@ def render_factor_radar_card(analysis: dict, ticker: str, *, bordered: bool = Tr
             margin=dict(l=32, r=32, t=12, b=12),
             paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        _plotly_chart(fig, height=CHART_HEIGHT_RADAR)
         st.markdown("</div></div>", unsafe_allow_html=True)
 
 
@@ -1345,7 +1366,7 @@ def render_etf_view(ticker: str) -> None:
             yaxis=dict(showgrid=True, gridcolor="#f3f4f6", tickprefix="$"),
             xaxis=dict(showgrid=False),
         )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        _plotly_chart(fig, height=280)
 
     if info.get("description"):
         with st.expander("Description"):

@@ -74,19 +74,18 @@ CHART_HEIGHT_ANALYST_PIE = 158
 GAUGE_MAX_WIDTH = "132px"
 
 FACTOR_LABELS = {
-    "value": "Value (earnings yield · B/M · FCF · Graham)",
+    "value": "Value (earnings yield · B/M · FCF)",
     "garp": "GARP (Lynch dividend-adjusted PEG)",
     "quality": "Quality / Profitability",
     "balance_sheet": "Balance Sheet Strength",
     "momentum": "Momentum (12-1)",
     "low_volatility": "Low Volatility",
     "capital_discipline": "Capital Discipline (yield + asset growth)",
-    "earnings_revisions": "Earnings Revisions",
 }
 
 BARGAIN_LABELS = {
     "margin_of_safety": "Margin of Safety (Graham)",
-    "valuation_vs_history": "Valuation vs Own 5y History",
+    "valuation_vs_history": "Valuation vs Own History (≈5y, data permitting)",
     "discount_52w": "Discount to 52-Week High",
 }
 
@@ -98,10 +97,9 @@ SHORT_FACTOR_LABELS = {
     "momentum": "Momentum",
     "low_volatility": "Low Volatility",
     "capital_discipline": "Capital Discipline",
-    "earnings_revisions": "Est. Revisions",
 }
 
-# Short labels for the 8-spoke radar chart.
+# Short labels for the radar chart (one spoke per factor group).
 RADAR_FACTOR_LABELS: dict[str, str] = {
     "value":              "Value",
     "garp":               "GARP",
@@ -110,7 +108,6 @@ RADAR_FACTOR_LABELS: dict[str, str] = {
     "momentum":           "Momentum",
     "low_volatility":     "Low Vol",
     "capital_discipline": "Cap. Disc.",
-    "earnings_revisions": "Est. Rev.",
 }
 
 # Factor Scorecard display: 2 groups per column.
@@ -119,7 +116,7 @@ FACTOR_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
     ("Valuation", "#14b8a6", ["value", "garp"]),
     ("Quality & Health", "#8b5cf6", ["quality", "balance_sheet"]),
     ("Returns & Capital", "#3b82f6", ["capital_discipline", "momentum"]),
-    ("Market & Sentiment", "#f59e0b", ["low_volatility", "earnings_revisions"]),
+    ("Market Behavior", "#f59e0b", ["low_volatility"]),
 ]
 
 FACTOR_COLORS = {
@@ -130,7 +127,6 @@ FACTOR_COLORS = {
     "momentum":           "#3b82f6",
     "low_volatility":     "#f59e0b",
     "capital_discipline": "#34d399",
-    "earnings_revisions": "#ec4899",
 }
 
 # ── Fund (ETF / mutual fund) factor display ──────────────────────────────────
@@ -204,11 +200,12 @@ SECURITY_TYPE_BADGES = {
 
 METRIC_HELP = {
     "composite_score": (
-        "Single number from 0–100 that blends how this stock ranks on 8 factor groups "
-        "(value, GARP, quality, balance sheet, momentum, low volatility, capital discipline, "
-        "earnings revisions) vs S&P 500 peers. Each group rank-averages its own sub-signals "
-        "before weighting, so no single ratio dominates. 50+ is the configured composite_min "
-        "good-buy bar. Only groups with available data are included; check Factor Coverage."
+        "Single number from 0–100 that blends how this stock ranks on 7 factor groups "
+        "(value, GARP, quality, balance sheet, momentum, low volatility, capital "
+        "discipline) vs S&P 500 peers. Each group rank-averages its own sub-signals "
+        "before weighting, so no single ratio dominates. The good-buy bar is the "
+        "configured composite_min. Only groups with available data are included; a Buy "
+        "additionally requires Factor Coverage of at least the configured minimum."
     ),
     "price": (
         "What one share costs right now in dollars. This is market price, not a quality score—"
@@ -288,9 +285,10 @@ METRIC_HELP = {
 # Hover copy for Factor Scorecard: what the metric means and how it's built.
 FACTOR_HELP: dict[str, str] = {
     "value": (
-        "Composite value rank: each of four sub-signals (earnings yield EBIT/EV, "
-        "FCF yield, book-to-market, Graham ratio) is ranked cross-sectionally then "
-        "averaged. Higher = cheaper vs peers on multiple measures."
+        "Composite value rank: each of three sub-signals (earnings yield EBIT/EV, "
+        "FCF yield, book-to-market) is ranked cross-sectionally then averaged. "
+        "Higher = cheaper vs peers on multiple measures. The Graham ratio is "
+        "tracked separately in the bargain score to avoid double-counting."
     ),
     "garp": (
         "Growth at a reasonable price (Peter Lynch): (earnings growth % + dividend yield %) "
@@ -319,11 +317,6 @@ FACTOR_HELP: dict[str, str] = {
         "Composite capital-discipline rank: shareholder yield (dividends + buybacks "
         "/ market cap) and investment factor (inverted asset growth) are each ranked "
         "then averaged. Higher = more cash returned, less balance-sheet expansion."
-    ),
-    "earnings_revisions": (
-        "Analyst recommendation momentum: recent upgrades minus downgrades from "
-        "published recommendation history. Higher = improving analyst sentiment. "
-        "Live-only signal (excluded from historical backtesting)."
     ),
 }
 
@@ -1547,6 +1540,10 @@ def render_fund_composite_card(
     composite = analysis.get("composite")
     comp_color = gauge_score_color(composite)
     comp_label = gauge_score_label(composite)
+    bargain = analysis.get("bargain") or {}
+    bargain_score = bargain.get("score")
+    bargain_color = gauge_score_color(bargain_score)
+    bargain_label = gauge_score_label(bargain_score)
 
     date_label = _format_snapshot_date(snapshot_date)
     subtitle = (
@@ -1555,19 +1552,29 @@ def render_fund_composite_card(
         else "vs US + Canadian fund universe"
     )
 
-    gauge = _arc_gauge_html(
+    composite_gauge = _arc_gauge_html(
         composite,
         comp_label,
         comp_color,
         subtitle=subtitle,
         aria_label="Fund composite score gauge",
         fill_color=comp_color,
-        max_width="150px",
+        max_width=GAUGE_MAX_WIDTH,
     )
+    bargain_gauge = _arc_gauge_html(
+        bargain_score,
+        bargain_label,
+        bargain_color,
+        subtitle="52W discount · RSI oversold",
+        aria_label="Fund bargain score gauge",
+        fill_color=bargain_color,
+        max_width=GAUGE_MAX_WIDTH,
+    )
+
     rsi = analysis.get("rsi_14")
     rsi_note = (
         f'<div style="text-align:center;color:#6b7280;font-size:0.8rem;margin-top:0.25rem;">'
-        f"RSI(14): {rsi:.0f} (timing only — not in composite)</div>"
+        f"RSI(14): {rsi:.0f} (included in bargain score)</div>"
         if rsi is not None
         else ""
     )
@@ -1578,7 +1585,11 @@ def render_fund_composite_card(
             '<div class="composite-gauges-row">'
             '<div class="gauge-cell">'
             '<div class="gauge-title">Fund Composite Score</div>'
-            + gauge
+            + composite_gauge
+            + '</div>'
+            '<div class="gauge-cell">'
+            '<div class="gauge-title">Bargain Score</div>'
+            + bargain_gauge
             + rsi_note
             + "</div></div></div>",
             unsafe_allow_html=True,
@@ -1715,10 +1726,11 @@ def render_fund_view(
     st.caption(
         "Funds are scored on fund-appropriate factors (fees, realized returns, "
         "risk-adjusted return, volatility, momentum, income) against a peer universe "
-        "of US and Canadian ETFs and mutual funds. Stock metrics that rely on company "
-        "financials or analyst coverage — Graham margin of safety, balance-sheet "
-        "strength, analyst consensus — do not exist for funds and are intentionally "
-        "excluded rather than approximated."
+        "of US and Canadian ETFs and mutual funds. The bargain score is price-based only "
+        "(52-week high discount + RSI oversold signal) since fund financials don't exist. "
+        "Stock metrics that rely on company financials or analyst coverage — Graham margin "
+        "of safety, balance-sheet strength, analyst consensus — are intentionally excluded "
+        "rather than approximated."
     )
 
     if analysis.get("is_etf"):
@@ -1855,7 +1867,7 @@ def _render_stock_sidebar_sections(config: dict) -> None:
     st.markdown("---")
     st.markdown("**Composite factor weights**")
     st.caption(
-        "Eight factor groups (evidence-based priors for buy-and-hold). "
+        "Seven factor groups (evidence-based priors for buy-and-hold). "
         "Shown as a share of total; renormalized at runtime over groups with data."
     )
     factor_weights = get_factor_weights(config)

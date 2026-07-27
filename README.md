@@ -2,12 +2,21 @@
 
 Empirical factor scoring and aggregated analyst recommendations for stocks — plus fund-appropriate factor scoring for US and Canadian ETFs and mutual funds — with weekly watchlist and monthly S&P 500 scorecard emails.
 
+## What this tool is (and isn't)
+
+The composite score has **not demonstrated a statistically significant edge over
+the S&P 500** in out-of-sample validation (see "What the backtest actually
+shows" below). Treat it as a **disqualifier and diversification aid** — a
+structured way to refuse stocks with poor quality, leverage, or accrual
+profiles, and to pick low-cost funds — not as an alpha-generating ranking to
+chase. Keep a broad low-cost index core.
+
 ## Features
 
 - **Streamlit dashboard** — enter a ticker for factor scorecard, analyst consensus, price targets, and implied upside
-- **Extended factor set** — Value, Momentum (12-1), Quality, Low Volatility, Investment, Earnings Revisions, Piotroski F-Score
+- **Seven factor groups** — Value, GARP, Quality, Balance Sheet, Momentum (12-1), Low Volatility, Capital Discipline
 - **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
-- **Bargain score** — long-horizon cheapness (Graham margin of safety, valuation vs own 5y history, 52-week discount)
+- **Bargain score** — long-horizon cheapness (Graham margin of safety, valuation vs own history, 52-week discount)
 - **Fund view (ETFs & mutual funds, US + Canada)** — full dashboard with a fund composite score, factor scorecard, radar, and price history, scored against a peer universe of well-known US and Canadian funds
 - **Weekly email** — Monday watchlist scorecard (composite, bargain, upside, Buy/Not Buy)
 - **Monthly email** — full S&P 500 scorecard (1st of each month)
@@ -41,12 +50,12 @@ large enough):
 
 | Group | Signal | Default weight |
 |-------|--------|----------------|
-| `cost` | Expense ratio (inverted — fees are the strongest predictor of relative fund performance) | 25% |
-| `performance` | 3y and 5y annualized total returns | 20% |
-| `risk_adjusted` | Trailing 1y return / annualized volatility (Sharpe-style) | 20% |
+| `cost` | Expense ratio (inverted — fees are the one robust predictor of relative fund performance, so cost dominates) | 35% |
+| `performance` | 3y and 5y annualized total returns (down-weighted: past fund returns are a weak predictor after fees) | 15% |
+| `risk_adjusted` | Trailing 1y return / annualized volatility (no risk-free adjustment; a coarse ratio, not a true Sharpe) | 15% |
 | `low_volatility` | Inverse 12m volatility + max-drawdown protection | 15% |
 | `momentum` | 12-1 month return | 10% |
-| `income` | Distribution yield | 10% |
+| `income` | Distribution yield (a payout preference, not a return signal) | 10% |
 
 Weights live under `fund_factor_weights` in `config.yaml`. Metrics that can't
 be converted from the stock model (Graham margin of safety, balance-sheet
@@ -72,7 +81,12 @@ Edit [`config.yaml`](config.yaml):
 
 **Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the weekly watchlist job.
 
-Default buy rule: `composite >= 57.3` AND `bargain >= 49.4` AND consensus is not Sell. Analyst implied upside is shown for context but is not a hard gate. Thresholds were recalibrated on 3-year forward excess returns.
+Default buy rule: `composite >= threshold` AND `bargain >= threshold` AND factor
+coverage ≥ 70% AND consensus is not Sell (see `config.yaml` for current values,
+which are written by `python -m backtest.run apply` from committed calibration
+artifacts in `backtest/results/`). Analyst implied upside is shown for context
+but is not a hard gate. The coverage gate prevents stocks with sparse financial
+data from passing on a composite renormalized over only a few factor groups.
 
 ## Email alerts setup
 
@@ -115,10 +129,10 @@ Also set `email.enabled: true` in `config.yaml` (or rely on `SMTP_PASSWORD` bein
 
 ```bash
 # Weekly watchlist scorecard (use --no-email to dry-run)
-python jobs/daily_check.py --no-email
+python jobs/watchlist_weekly.py --no-email
 
 # Monthly S&P 500 scorecard (slow — full universe; use --fast --max 50 for dev)
-python jobs/weekly_check.py --no-email --fast --max 50
+python jobs/universe_monthly.py --no-email --fast --max 50
 ```
 
 When ready, omit `--no-email` to send the HTML scorecard to your inbox.
@@ -129,16 +143,16 @@ When ready, omit `--no-email` to send the HTML scorecard to your inbox.
 
 | Workflow | Schedule | What it does |
 |----------|----------|--------------|
-| `.github/workflows/daily.yml` | Mondays 14:00 UTC | Watchlist scorecard email |
-| `.github/workflows/weekly.yml` | 1st of month 14:00 UTC | Full S&P 500 scorecard + stock and fund snapshot refresh |
+| `.github/workflows/watchlist-weekly.yml` | Mondays 14:00 UTC | Watchlist scorecard email |
+| `.github/workflows/universe-monthly.yml` | 1st of month 14:00 UTC | Full S&P 500 scorecard + stock and fund snapshot refresh |
 
 Adjust cron times in the workflow files for your timezone (14:00 UTC ≈ 7:00 AM Pacific).
 
 **Local cron (macOS/Linux)** example:
 
 ```cron
-0 7 * * 1 cd /path/to/financial-tools && .venv/bin/python jobs/daily_check.py
-0 7 1 * * cd /path/to/financial-tools && .venv/bin/python jobs/weekly_check.py
+0 7 * * 1 cd /path/to/financial-tools && .venv/bin/python jobs/watchlist_weekly.py
+0 7 1 * * cd /path/to/financial-tools && .venv/bin/python jobs/universe_monthly.py
 ```
 
 Each email includes a table with **Composite**, **Bargain**, **Upside**, and **Buy / Not Buy** for every ticker. Buys are sorted to the top.
@@ -154,8 +168,8 @@ Each email includes a table with **Composite**, **Bargain**, **Upside**, and **B
 ## Scheduled jobs
 
 ```bash
-python jobs/daily_check.py    # weekly watchlist scorecard
-python jobs/weekly_check.py   # monthly full S&P 500 (slow)
+python jobs/watchlist_weekly.py    # weekly watchlist scorecard
+python jobs/universe_monthly.py   # monthly full S&P 500 (slow)
 ```
 
 Options for both:
@@ -173,7 +187,7 @@ Options for both:
 ```
 core/           # data fetch, factors (stock + fund), scoring, analysts, universes
 app.py          # Streamlit dashboard
-jobs/           # daily_check.py, weekly_check.py, email_sender.py
+jobs/           # watchlist_weekly.py, universe_monthly.py, email_sender.py
 watchlist       # your watchlist (one ticker per line)
 config.yaml     # thresholds, weights (stock + fund), email
 data/           # universe_snapshot.parquet + fund_universe_snapshot.parquet
@@ -196,6 +210,31 @@ prices, covering historical S&P 500 constituents from 2010 to 2026.
 - Bargain weights (Graham margin of safety, valuation vs own history, 52w discount)
   are validated via long-horizon rank IC.
 - Good-buy thresholds are calibrated on **3-year** forward excess-return buckets.
+
+### What the backtest actually shows
+
+Judge the tool by the **out-of-sample fold statistics**, not by any full-period
+terminal-wealth simulation (those evaluate parameters on the same window used
+to choose them, and free price data excludes delisted tickers entirely, so
+strategy results are survivorship-biased upward).
+
+The honest summary from the expanding-window folds (see
+`backtest/results/weight_candidate_comparison.json`):
+
+- 3-year rank IC of the composite is small (~0.05–0.07 across candidates).
+- Mean 3-year excess return of the gated DCA strategy vs SPY has a bootstrap
+  CI that **includes zero** — no candidate is statistically distinguishable
+  from the index or from the other candidates.
+- Bargain-score rank ICs are near zero at every horizon (~0.01), so the
+  bargain gate is best understood as an entry-discipline heuristic, not a
+  validated return predictor.
+
+Known limitations: ~175 delisted historical S&P 500 members (bankruptcies and
+acquisitions) have no free price history and can never be selected by the
+simulation; 2010–2026 is a single, mostly-bull regime with few independent
+3-year windows; live fundamentals come from Yahoo while backtest fundamentals
+come from EDGAR. Fixing the survivorship gap requires paid data (e.g. Norgate,
+Sharadar, or EODHD delisted coverage).
 
 ```bash
 # Full validation pipeline (slow: hours for complete SEC + price ingest)
@@ -224,18 +263,15 @@ python -m backtest.run pipeline --max-edgar-quarters 8 --max-quarters 8 --max-ti
 Results are written to `backtest/results/` (report, comparison JSON, DCA validation).
 Cached data lives in `backtest/data/store/` (gitignored).
 
-## Calibration (sample run, 30-ticker universe)
+## Spot-checking a snapshot
 
-Spot-check results after building the snapshot:
-
-| Ticker | Expected signal | Sample result |
-|--------|-----------------|---------------|
-| KO | High value | ~88th percentile value |
-| NVDA | High momentum / revisions | ~73rd momentum, ~91st earnings revisions |
-| JPM | Moderate value, strong momentum | ~31st value, ~93rd momentum |
-| AAPL | Balanced mega-cap | ~48 composite (below default 50 threshold) |
-
-NVDA can show high analyst upside while still scoring poorly on value/quality — upside alone no longer forces a Buy. Validate `thresholds` and `factor_weights` via `python -m backtest.run compare` or edit `config.yaml` directly.
+After building a snapshot, sanity-check a few names with known profiles:
+mature dividend payers (e.g. KO) should rank high on value, recent runners
+(e.g. NVDA) high on momentum but low on value, and a balanced mega-cap
+(e.g. AAPL) should land mid-pack on the composite. A stock can show high
+analyst upside while still scoring poorly on value/quality — upside alone
+never forces a Buy. Validate `thresholds` and `factor_weights` via
+`python -m backtest.run compare` or edit `config.yaml` directly.
 
 To rebuild with more tickers for better cross-sections:
 

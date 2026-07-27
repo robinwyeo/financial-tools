@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -57,6 +58,7 @@ def calibrate_thresholds(
     prices: pd.DataFrame | None = None,
     target_positive_excess_bucket: int = 7,
     horizon: str = PRIMARY_EVAL_HORIZON,
+    results_dir: Path | None = None,
 ) -> dict[str, Any]:
     """
     Set composite_min / bargain_min where long-horizon forward excess turns positive.
@@ -117,8 +119,9 @@ def calibrate_thresholds(
         if not bargain_buckets.empty
         else {},
     }
-    path = RESULTS_DIR / "threshold_calibration.json"
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = results_dir if results_dir is not None else RESULTS_DIR
+    path = out_dir / "threshold_calibration.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     logger.info(
         "Calibrated thresholds on %s: composite_min=%.1f bargain_min=%.1f",

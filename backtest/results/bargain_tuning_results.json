@@ -1,0 +1,61 @@
+{
+  "objective": "validate_bargain_ic_3y",
+  "horizon": "3y",
+  "winner_name": "default_long_horizon",
+  "winner_weights": {
+    "margin_of_safety": 0.4,
+    "valuation_vs_history": 0.35,
+    "discount_52w": 0.25
+  },
+  "winner_mean_ic": 0.007960552004662613,
+  "baseline_weights": {
+    "margin_of_safety": 0.4,
+    "valuation_vs_history": 0.35,
+    "discount_52w": 0.25
+  },
+  "baseline_mean_ic": 0.007960552004662613,
+  "candidates": {
+    "default_long_horizon": {
+      "weights": {
+        "margin_of_safety": 0.4,
+        "valuation_vs_history": 0.35,
+        "discount_52w": 0.25
+      },
+      "horizon_ics": {
+        "1q": 0.013835703407483175,
+        "1y": 0.01114564410046695,
+        "3y": 0.007960552004662613,
+        "5y": 0.01240813108494166
+      },
+      "primary_ic": 0.007960552004662613
+    },
+    "graham_heavy": {
+      "weights": {
+        "margin_of_safety": 0.55,
+        "valuation_vs_history": 0.3,
+        "discount_52w": 0.15
+      },
+      "horizon_ics": {
+        "1q": 0.013316551103325839,
+        "1y": 0.012290930957472836,
+        "3y": 0.01615535363794999,
+        "5y": 0.021748852307906807
+      },
+      "primary_ic": 0.01615535363794999
+    },
+    "equal": {
+      "weights": {
+        "margin_of_safety": 0.3333333333333333,
+        "valuation_vs_history": 0.3333333333333333,
+        "discount_52w": 0.3333333333333333
+      },
+      "horizon_ics": {
+        "1q": 0.013838582463892104,
+        "1y": 0.010607260531073127,
+        "3y": 0.0012832532738818387,
+        "5y": 0.0038716771862673353
+      },
+      "primary_ic": 0.0012832532738818387
+    }
+  }
+}

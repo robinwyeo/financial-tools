@@ -1,0 +1,124 @@
+{
+  "objective": "gated_dca_expanding_window_with_bootstrap",
+  "primary_horizon": "3y",
+  "composite_min": 57.3,
+  "bargain_min": 49.4,
+  "top_n": 5,
+  "candidates": [
+    {
+      "name": "evidence_based",
+      "factor_weights": {
+        "value": 0.25,
+        "garp": 0.1,
+        "quality": 0.25,
+        "balance_sheet": 0.1,
+        "momentum": 0.1,
+        "low_volatility": 0.075,
+        "capital_discipline": 0.125
+      },
+      "horizon_ics": {
+        "1q": 0.015862367779251513,
+        "1y": 0.027068538653898862,
+        "3y": 0.05987728682999159,
+        "5y": 0.06267663818578766
+      },
+      "primary_ic": 0.05987728682999159,
+      "fold_excess_roi": [
+        -0.0073802173011718875,
+        0.052409318424458506,
+        -0.05274756322474161,
+        0.11077452708932789,
+        -0.048356803078670074,
+        0.057726675049679876
+      ],
+      "excess_mean": 0.018737656159813782,
+      "excess_ci_low": -0.026196605247256127,
+      "excess_ci_high": 0.06479756917303843,
+      "frac_folds_positive": 0.5
+    },
+    {
+      "name": "equal",
+      "factor_weights": {
+        "value": 0.14285714285714285,
+        "garp": 0.14285714285714285,
+        "quality": 0.14285714285714285,
+        "balance_sheet": 0.14285714285714285,
+        "momentum": 0.14285714285714285,
+        "low_volatility": 0.14285714285714285,
+        "capital_discipline": 0.14285714285714285
+      },
+      "horizon_ics": {
+        "1q": 0.011257197010570328,
+        "1y": 0.029748424330637055,
+        "3y": 0.07024448530219879,
+        "5y": 0.07667512324168402
+      },
+      "primary_ic": 0.07024448530219879,
+      "fold_excess_roi": [
+        0.007656850926604397,
+        0.05522062536007355,
+        -0.03346755902018317,
+        0.10286031534799656,
+        -0.10687417834757618,
+        0.023141348474192025
+      ],
+      "excess_mean": 0.008089567123517863,
+      "excess_ci_low": -0.047038455173470314,
+      "excess_ci_high": 0.055246246859701725,
+      "frac_folds_positive": 0.6666666666666666
+    },
+    {
+      "name": "legacy_tuned",
+      "factor_weights": {
+        "value": 0.030105263157894736,
+        "garp": 0.4348421052631579,
+        "quality": 0.10968421052631579,
+        "balance_sheet": 0.1436842105263158,
+        "momentum": 0.07242105263157894,
+        "low_volatility": 0.13905263157894734,
+        "capital_discipline": 0.07021052631578946
+      },
+      "horizon_ics": {
+        "1q": 0.009572867716728507,
+        "1y": 0.028185639609883777,
+        "3y": 0.06513438870100888,
+        "5y": 0.06951278973838501
+      },
+      "primary_ic": 0.06513438870100888,
+      "fold_excess_roi": [
+        0.022042034015404166,
+        0.05232235841625865,
+        -0.024566115033689773,
+        0.10396498124306341,
+        -0.1680827334758781,
+        -0.04150233977716877
+      ],
+      "excess_mean": -0.009303635768668403,
+      "excess_ci_low": -0.08350967867979253,
+      "excess_ci_high": 0.052514178679678225,
+      "frac_folds_positive": 0.5
+    }
+  ],
+  "comparisons": [
+    {
+      "winner": "evidence_based",
+      "challenger": "equal",
+      "indistinguishable": true
+    },
+    {
+      "winner": "evidence_based",
+      "challenger": "legacy_tuned",
+      "indistinguishable": true
+    }
+  ],
+  "recommended": "evidence_based",
+  "recommended_weights": {
+    "value": 0.25,
+    "garp": 0.1,
+    "quality": 0.25,
+    "balance_sheet": 0.1,
+    "momentum": 0.1,
+    "low_volatility": 0.075,
+    "capital_discipline": 0.125
+  }
+}

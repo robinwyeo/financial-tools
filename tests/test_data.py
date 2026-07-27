@@ -2,12 +2,16 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
+import core.data as core_data
 from core.data import (
     _compute_rsi,
     _info_is_usable,
+    build_earnings_yield_history,
     extract_financial_values,
     normalize_debt_to_equity,
+    percentile_rank_in_history,
 )
 
 
@@ -108,3 +112,59 @@ def test_info_is_usable_requires_price_and_name():
     assert not _info_is_usable({"longName": "Amazon.com, Inc."})
     assert not _info_is_usable({"currentPrice": 100.0})
     assert _info_is_usable({"longName": "Amazon.com, Inc.", "currentPrice": 100.0})
+
+
+def _fake_ey_statements(now: pd.Timestamp):
+    """Annual FY EBIT=100; quarterly EBIT=25 (TTM=100); shares=10; no debt/cash."""
+    annual_cols = [str((now - pd.DateOffset(years=k)).date()) for k in (1, 2, 3)]
+    a_income = pd.DataFrame({c: [100.0] for c in annual_cols}, index=["EBIT"])
+    a_balance = pd.DataFrame(
+        {c: [10.0, 0.0, 0.0] for c in annual_cols},
+        index=["Ordinary Shares Number", "Total Debt", "Cash And Cash Equivalents"],
+    )
+
+    q_ends = pd.date_range(end=now, periods=6, freq="QE")
+    q_cols = [str(d.date()) for d in q_ends]
+    q_income = pd.DataFrame({c: [25.0] for c in q_cols}, index=["EBIT"])
+    q_balance = pd.DataFrame(
+        {c: [10.0, 0.0, 0.0] for c in q_cols},
+        index=["Ordinary Shares Number", "Total Debt", "Cash And Cash Equivalents"],
+    )
+    return (
+        {"income": a_income, "balance": a_balance, "cashflow": pd.DataFrame()},
+        {"income": q_income, "balance": q_balance, "cashflow": pd.DataFrame()},
+    )
+
+
+def test_earnings_yield_history_is_annualized(monkeypatch):
+    """
+    Regression: history points must be in annualized EBIT/EV units, matching the
+    current EY. The old builder used single-quarter EBIT, so the current annual
+    EY sat above ~all of its own history (percentile pinned at ~100).
+    """
+    now = pd.Timestamp.now().normalize()
+    annual, quarterly = _fake_ey_statements(now)
+    dates = pd.date_range(end=now, periods=4 * 365, freq="D")
+    prices = pd.DataFrame({"Close": np.full(len(dates), 100.0)}, index=dates)
+
+    monkeypatch.setattr(core_data, "fetch_financials", lambda t: annual)
+    monkeypatch.setattr(core_data, "fetch_quarterly_financials", lambda t: quarterly)
+    monkeypatch.setattr(core_data, "fetch_price_history", lambda t, **kw: prices)
+    monkeypatch.setattr(core_data, "_read_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(core_data, "_write_cache", lambda *a, **kw: None)
+
+    history = build_earnings_yield_history("FAKE")
+
+    # EV = 100 * 10 = 1000; annualized EBIT = 100 → every point is 0.10.
+    assert len(history) >= 4
+    for point in history:
+        assert point == pytest.approx(0.10, rel=1e-6)
+
+    # Current annual EY equals the history level → percentile must not saturate
+    # relative to a like-for-like history. With the old quarterly-unit bug the
+    # history was ~0.025 and 0.10 ranked at the 100th percentile by a 4x margin.
+    current_ey = 100.0 / 1000.0
+    pct = percentile_rank_in_history(current_ey, history)
+    assert pct is not None
+    # A slightly cheaper-than-history stock ranks low, not at 100.
+    assert percentile_rank_in_history(current_ey * 0.9, history) == 0.0

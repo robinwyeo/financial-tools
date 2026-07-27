@@ -8,8 +8,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from core.analysts import recommendation_period_shift
-
 
 def _ratio(num: float | None, den: float | None) -> float | None:
     if num is None or den is None or den == 0:
@@ -84,32 +82,6 @@ def compute_investment_factor(raw: dict[str, Any]) -> dict[str, float | None]:
         return {"asset_growth": None, "investment": None}
     growth = (ta / ta_prior) - 1.0
     return {"asset_growth": growth, "investment": -growth}
-
-
-def compute_earnings_revisions(raw: dict[str, Any]) -> dict[str, float | None]:
-    """
-    Analyst recommendation momentum: recent upgrades minus downgrades.
-    Uses yfinance recommendation history only (no target-price blend to avoid
-    double-counting with the analyst_upside good-buy gate).
-    """
-    recs: pd.DataFrame = raw.get("recommendations", pd.DataFrame())
-    score = None
-
-    if recs is not None and not recs.empty:
-        df = recs.copy()
-        col_map = {c.lower(): c for c in df.columns}
-        action_col = col_map.get("action") or col_map.get("rating")
-        if action_col:
-            recent = df.tail(20)
-            upgrades = recent[action_col].astype(str).str.lower().str.contains("up|raise|buy", na=False).sum()
-            downgrades = recent[action_col].astype(str).str.lower().str.contains("down|lower|sell", na=False).sum()
-            score = float(upgrades - downgrades)
-        else:
-            period_score, _, _ = recommendation_period_shift(df)
-            if period_score is not None:
-                score = period_score * 10.0
-
-    return {"earnings_revisions": score}
 
 
 def compute_piotroski_f_score(raw: dict[str, Any]) -> dict[str, float | None]:
@@ -482,7 +454,6 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     out.update(compute_quality_factors(raw))
     out.update(compute_low_volatility_factor(raw))
     out.update(compute_investment_factor(raw))
-    out.update(compute_earnings_revisions(raw))
     out.update(compute_piotroski_f_score(raw))
     out.update(compute_garp_factor(raw))
     out.update(compute_balance_sheet_strength(raw))
@@ -499,8 +470,12 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
 # Each group is scored by: rank each sub-signal cross-sectionally → average
 # available sub-signal percentiles → group percentile score.
 # Composite = weighted average of group percentile scores.
+#
+# graham_ratio is intentionally NOT in the value group: it already drives 40%
+# of the bargain score, and including it here double-counted the same signal
+# across both legs of the Buy gate.
 FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
-    "value": ["earnings_yield", "fcf_yield", "book_to_market", "graham_ratio"],
+    "value": ["earnings_yield", "fcf_yield", "book_to_market"],
     "garp": ["garp"],
     "quality": [
         "gross_profitability", "roe", "roa", "profit_margin",
@@ -510,5 +485,4 @@ FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
     "momentum": ["momentum_12_1"],
     "low_volatility": ["low_volatility"],
     "capital_discipline": ["shareholder_yield", "investment"],
-    "earnings_revisions": ["earnings_revisions"],
 }

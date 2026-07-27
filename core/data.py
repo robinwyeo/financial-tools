@@ -70,6 +70,14 @@ def normalize_debt_to_equity(val: float | None) -> float | None:
     if val is None:
         return None
     if abs(val) > 10:
+        # 10 < |val| <= 40 is ambiguous: could be a percent (0.1x-0.4x) or a
+        # genuinely extreme leverage ratio that this heuristic would misread.
+        if abs(val) <= 40:
+            logger.warning(
+                "debt_to_equity=%.2f in ambiguous unit range; treating as percent (%.2fx)",
+                val,
+                val / 100.0,
+            )
         return val / 100.0
     return val
 
@@ -351,13 +359,25 @@ def normalize_fund_yield(info: dict[str, Any]) -> float | None:
     Values above 0.15 are assumed to be percentages (15%+ fund yields are
     implausible as fractions in this universe).
     """
+    def _percent_to_fraction(v: float, field: str) -> float:
+        # 0.15 < v < 1.0 is ambiguous: a sub-1% "percent" value or a 15%+
+        # fraction. Flag it so bad units don't silently skew the income factor.
+        if v < 1.0:
+            logger.warning(
+                "%s=%.4f in ambiguous unit range; treating as percent (%.4f)",
+                field,
+                v,
+                v / 100.0,
+            )
+        return v / 100.0
+
     val = _safe_float(info.get("yield"))
     if val is None:
         val = _safe_float(info.get("dividendYield"))
         if val is not None and val > 0.15:
-            val = val / 100.0
+            val = _percent_to_fraction(val, "dividendYield")
     elif val > 0.15:
-        val = val / 100.0
+        val = _percent_to_fraction(val, "yield")
     return val
 
 
@@ -834,79 +854,126 @@ def _row_value_at(df: pd.DataFrame, names: list[str], col: Any) -> float | None:
     return None
 
 
+_BALANCE_SHARES_ROWS = ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"]
+_BALANCE_DEBT_ROWS = ["Total Debt", "Long Term Debt And Capital Lease Obligation", "Long Term Debt"]
+_BALANCE_CASH_ROWS = ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", "Cash"]
+
+
+def _ey_point(
+    annualized_ebit: float | None,
+    balance: pd.DataFrame,
+    balance_col: Any,
+    closes: pd.Series,
+    as_of: pd.Timestamp,
+) -> float | None:
+    """Annualized EBIT / EV as of a statement date, or None if inputs are missing."""
+    if annualized_ebit is None:
+        return None
+    shares = _row_value_at(balance, _BALANCE_SHARES_ROWS, balance_col)
+    if shares is None or shares <= 0:
+        return None
+    eligible = closes[closes.index <= as_of]
+    if eligible.empty:
+        return None
+    price = _safe_float(eligible.iloc[-1])
+    if price is None or price <= 0:
+        return None
+    total_debt = _row_value_at(balance, _BALANCE_DEBT_ROWS, balance_col)
+    total_cash = _row_value_at(balance, _BALANCE_CASH_ROWS, balance_col)
+    enterprise_value = price * shares + (total_debt or 0.0) - (total_cash or 0.0)
+    if enterprise_value <= 0:
+        return None
+    return float(annualized_ebit / enterprise_value)
+
+
+def _statement_col_dates(df: pd.DataFrame) -> list[tuple[Any, pd.Timestamp]]:
+    out: list[tuple[Any, pd.Timestamp]] = []
+    for col in _financial_columns_newest_first(df):
+        try:
+            ts = pd.to_datetime(col)
+        except (TypeError, ValueError):
+            continue
+        if pd.notna(ts):
+            out.append((col, ts))
+    return out
+
+
 def build_earnings_yield_history(
     ticker: str,
     *,
     years: int = 5,
 ) -> list[float]:
     """
-    Build a trailing earnings-yield (EBIT/EV) series from quarterly statements.
+    Build an *annualized* earnings-yield (EBIT/EV) history in the same units as
+    the current EY (annual EBIT / EV), so own-history percentiles compare
+    like-for-like.
 
-    For each quarter column, EV ≈ market_cap + debt − cash using the price on
-    or before the statement date and shares outstanding when available.
+    Points come from two sources, all annualized:
+      - annual statements: fiscal-year EBIT / EV at each fiscal year end
+      - quarterly statements: trailing-4-quarter EBIT sums / EV at quarter end
+        (only where 4 consecutive quarters exist)
+
+    Yahoo typically exposes ~4 annual and ~5-6 quarterly periods, so the series
+    spans roughly 4-5 years with a handful of observations. EV ≈ price × shares
+    + debt − cash from the balance sheet at the same date.
     """
-    cache_path = _cache_key("eyhist", ticker.upper(), str(years))
+    # v2: annualized units (the old quarterly-EBIT series was ~4x too small,
+    # which pinned the valuation-vs-history percentile at ~100 for most stocks).
+    cache_path = _cache_key("eyhist2", ticker.upper(), str(years))
     cached = _read_cache(cache_path, max_age_hours=48)
     if cached is not None and isinstance(cached.get("history"), list):
         return [float(v) for v in cached["history"] if v is not None]
-
-    qfin = fetch_quarterly_financials(ticker)
-    income = qfin.get("income", pd.DataFrame())
-    balance = qfin.get("balance", pd.DataFrame())
-    if income.empty or balance.empty:
-        return []
 
     hist = fetch_price_history(ticker, period="max")
     if hist.empty or "Close" not in hist.columns:
         return []
     closes = hist["Close"].dropna().sort_index()
 
-    income_cols = _financial_columns_newest_first(income)
-    # Keep roughly years * 4 quarters.
-    max_periods = max(4, years * 4)
-    income_cols = income_cols[:max_periods]
+    points: dict[pd.Timestamp, float] = {}
+    cutoff = pd.Timestamp.now() - pd.DateOffset(years=years)
 
-    history: list[float] = []
-    for col in income_cols:
-        ebit = _row_value_at(income, ["EBIT", "Operating Income"], col)
-        shares = _row_value_at(
-            balance,
-            ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"],
-            col,
-        )
-        total_debt = _row_value_at(
-            balance,
-            ["Total Debt", "Long Term Debt And Capital Lease Obligation", "Long Term Debt"],
-            col,
-        )
-        total_cash = _row_value_at(
-            balance,
-            ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", "Cash"],
-            col,
-        )
-        if ebit is None or shares is None or shares <= 0:
-            continue
-        try:
-            col_ts = pd.to_datetime(col)
-        except (TypeError, ValueError):
-            continue
-        if pd.isna(col_ts):
-            continue
-        # Price on or before statement date.
-        eligible = closes[closes.index <= col_ts]
-        if eligible.empty:
-            continue
-        price = _safe_float(eligible.iloc[-1])
-        if price is None or price <= 0:
-            continue
-        market_cap = price * shares
-        enterprise_value = market_cap + (total_debt or 0.0) - (total_cash or 0.0)
-        if enterprise_value <= 0:
-            continue
-        history.append(float(ebit / enterprise_value))
+    # Annual fiscal-year points.
+    afin = fetch_financials(ticker)
+    a_income = afin.get("income", pd.DataFrame())
+    a_balance = afin.get("balance", pd.DataFrame())
+    if not a_income.empty and not a_balance.empty:
+        for col, ts in _statement_col_dates(a_income):
+            if ts < cutoff:
+                continue
+            ebit = _row_value_at(a_income, ["EBIT", "Operating Income"], col)
+            ey = _ey_point(ebit, a_balance, col, closes, ts)
+            if ey is not None:
+                points[ts.normalize()] = ey
 
-    # Chronological order (oldest → newest) for readability; percentile doesn't care.
-    history = list(reversed(history))
+    # Trailing-twelve-month points from quarterly statements.
+    qfin = fetch_quarterly_financials(ticker)
+    q_income = qfin.get("income", pd.DataFrame())
+    q_balance = qfin.get("balance", pd.DataFrame())
+    if not q_income.empty and not q_balance.empty:
+        q_cols = _statement_col_dates(q_income)  # newest first
+        for i, (col, ts) in enumerate(q_cols):
+            if ts < cutoff:
+                continue
+            window = q_cols[i : i + 4]
+            if len(window) < 4:
+                continue
+            # Require 4 consecutive quarters (~a year's span) for a valid TTM sum.
+            span_days = (window[0][1] - window[-1][1]).days
+            if not 240 <= span_days <= 320:
+                continue
+            quarter_ebits = [
+                _row_value_at(q_income, ["EBIT", "Operating Income"], wcol)
+                for wcol, _ in window
+            ]
+            if any(v is None for v in quarter_ebits):
+                continue
+            ttm_ebit = float(sum(quarter_ebits))  # type: ignore[arg-type]
+            ey = _ey_point(ttm_ebit, q_balance, col, closes, ts)
+            if ey is not None:
+                # TTM points win over an annual point on the same date.
+                points[ts.normalize()] = ey
+
+    history = [points[ts] for ts in sorted(points)]
     _write_cache(cache_path, {"history": history})
     return history
 

@@ -145,10 +145,6 @@ def cmd_apply(args: argparse.Namespace) -> None:
     cfg = load_config()
     merged = get_factor_weights(cfg)
     merged.update(winner_fw)
-    # Keep earnings_revisions at evidence-based prior if missing from backtest weights.
-    if "earnings_revisions" not in winner_fw:
-        merged["earnings_revisions"] = EVIDENCE_BASED_FACTOR_WEIGHTS["earnings_revisions"]
-
     cfg["factor_weights"] = {k: round(float(v), 4) for k, v in merged.items()}
 
     if thresholds:

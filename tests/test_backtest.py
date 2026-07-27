@@ -156,7 +156,7 @@ def test_enrich_factor_panel_adds_valuation_bargain():
         assert f"bargain_{comp}" in enriched.columns
 
 
-def test_bargain_validation_uses_forward_horizons():
+def test_bargain_validation_uses_forward_horizons(tmp_path):
     """validate_bargain_weights should run and return a primary IC float."""
     from backtest.tune import validate_bargain_weights
 
@@ -192,13 +192,15 @@ def test_bargain_validation_uses_forward_horizons():
     eng._MONTHLY_RETURNS = None
     eng._QUARTER_END_PRICES = None
 
-    result = validate_bargain_weights(panel=panel, prices=prices)
+    # results_dir=tmp_path keeps the test from clobbering real artifacts
+    # in backtest/results/ (which previously silently zeroed them out).
+    result = validate_bargain_weights(panel=panel, prices=prices, results_dir=tmp_path)
     assert isinstance(result["winner_mean_ic"], float)
     assert "valuation_vs_history" in result["winner_weights"]
     assert "rsi_oversold" not in result["winner_weights"]
 
 
-def test_calibrate_thresholds_returns_bounds():
+def test_calibrate_thresholds_returns_bounds(tmp_path):
     panel = _synthetic_panel()
     prices = _synthetic_prices(panel)
     weights = current_baseline_factor_weights()
@@ -209,6 +211,8 @@ def test_calibrate_thresholds_returns_bounds():
     eng._MONTHLY_RETURNS = None
     eng._QUARTER_END_PRICES = None
 
-    out = calibrate_thresholds(weights, panel=panel, prices=prices, horizon="1q")
+    out = calibrate_thresholds(
+        weights, panel=panel, prices=prices, horizon="1q", results_dir=tmp_path
+    )
     assert 30.0 <= out["composite_min"] <= 80.0
     assert 30.0 <= out["bargain_min"] <= 80.0

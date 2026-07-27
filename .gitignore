@@ -10,7 +10,9 @@ venv/
 .streamlit/secrets.toml
 data/cache/
 backtest/data/store/
-backtest/results/
+# Keep validation artifacts (JSON + report) committed for threshold/weight
+# provenance; ignore only logs.
+backtest/results/*.log
 *.parquet.tmp
 .DS_Store
 .pytest_cache/

@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def run_weekly(
+def run_monthly(
     refresh_universe: bool = True,
     max_tickers: int | None = None,
     send_report: bool = True,
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sys.exit(
-        run_weekly(
+        run_monthly(
             refresh_universe=not args.no_refresh,
             max_tickers=args.max,
             send_report=not args.no_email,

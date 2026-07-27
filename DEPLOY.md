@@ -63,6 +63,6 @@ The post file is already scaffolded at:
 - **iframe height/mobile:** the embed is a fixed 900px tall. If it feels cramped, adjust the
   `height` in the iframe `style`, or lean on the "open in new tab" link as the primary CTA.
 - **Data freshness:** `yfinance` is a free, occasionally-flaky source. To keep universe ranks
-  fresh, the `.github/workflows/weekly.yml` job rebuilds the snapshot monthly; make sure that
+  fresh, the `.github/workflows/universe-monthly.yml` job rebuilds the snapshot monthly; make sure that
   workflow is enabled on the GitHub repo if you want automatic refreshes.
 - **No investment advice:** the post includes a disclaimer — keep it.

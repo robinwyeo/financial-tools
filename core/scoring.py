@@ -110,6 +110,59 @@ def compute_bargain_score(
     return {"score": score, "components": components}
 
 
+# Weights for fund-specific bargain score. Fund financials don't exist, so only
+# price-based signals are available: 52-week discount and RSI as an oversold proxy.
+FUND_BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
+    "discount_52w": 0.65,
+    "rsi_oversold": 0.35,
+}
+
+
+def compute_fund_bargain_score(
+    price: float | None,
+    fifty_two_week_high: float | None,
+    rsi_14: float | None,
+) -> dict[str, Any]:
+    """
+    Price-based bargain score for ETFs and mutual funds (0-100, higher = more of a bargain).
+
+    Fund financial statements don't exist, so only price-relative signals are used:
+      discount_52w  — % below 52-week high; linear 0%→0, 30%→100 (matches stock formula).
+      rsi_oversold  — inverted RSI(14): RSI 30→100, RSI 70→0. Signals a dip vs recent trend.
+
+    Renormalizes over available components when one signal is missing.
+    """
+    components: dict[str, float | None] = {
+        "discount_52w": None,
+        "rsi_oversold": None,
+    }
+
+    if (
+        price is not None
+        and fifty_two_week_high is not None
+        and fifty_two_week_high > 0
+        and price > 0
+    ):
+        discount_52w = 1.0 - (price / fifty_two_week_high)
+        components["discount_52w"] = _linear_score(discount_52w, 0.0, 0.30)
+
+    if rsi_14 is not None:
+        # RSI 30 (oversold) → score 100; RSI 70 (overbought) → score 0.
+        components["rsi_oversold"] = float(max(0.0, min(100.0, (70.0 - rsi_14) / 40.0 * 100.0)))
+
+    weighted_sum = 0.0
+    weight_available = 0.0
+    for key, sub_score in components.items():
+        if sub_score is None:
+            continue
+        w = FUND_BARGAIN_COMPONENT_WEIGHTS.get(key, 0.0)
+        weighted_sum += sub_score * w
+        weight_available += w
+
+    score = weighted_sum / weight_available if weight_available > 0 else None
+    return {"score": score, "components": components}
+
+
 def _bargain_fields(
     raw: dict,
     factors: dict,
@@ -249,9 +302,7 @@ LIVE_FACTOR_OVERLAY_COLUMNS = frozenset({
 })
 
 # Zero means "no signal" for these columns, not a measured value.
-ZERO_NEUTRAL_COLUMNS = frozenset({
-    "earnings_revisions",
-})
+ZERO_NEUTRAL_COLUMNS: frozenset[str] = frozenset()
 
 
 def _is_meaningful_value(val: Any, *, column: str | None = None) -> bool:
@@ -433,6 +484,7 @@ def score_ticker(
         analyst,
         thresholds,
         bargain_score=bargain_score,
+        factor_coverage_pct=factor_coverage_pct,
     )
 
     factor_breakdown: dict[str, dict] = {}
@@ -564,6 +616,11 @@ def score_fund(
                 "factor_breakdown": {
                     family: {"percentile": None} for family in FUND_FACTOR_SCORE_COLUMNS
                 },
+                "bargain": compute_fund_bargain_score(
+                    price=raw.get("price"),
+                    fifty_two_week_high=raw.get("fifty_two_week_high"),
+                    rsi_14=raw.get("rsi_14"),
+                ),
                 "warning": (
                     "Fund universe snapshot missing. Run `python -m core.fund_universe` "
                     "to build it."
@@ -600,6 +657,11 @@ def score_fund(
         for family in FUND_FACTOR_SCORE_COLUMNS
     }
     analysis["scored_row"] = scored_row
+    analysis["bargain"] = compute_fund_bargain_score(
+        price=raw.get("price"),
+        fifty_two_week_high=raw.get("fifty_two_week_high"),
+        rsi_14=raw.get("rsi_14"),
+    )
     return analysis
 
 
@@ -670,6 +732,7 @@ def apply_universe_snapshot_scoring(
         analyst,
         get_thresholds(cfg),
         bargain_score=bargain_score,
+        factor_coverage_pct=updated.get("factor_coverage_pct"),
     )
     return updated
 
@@ -706,7 +769,7 @@ def _score_without_universe(
         "analyst": analyst,
         "is_good_buy": False,
         "data_warnings": raw.get("data_warnings", []),
-        "warning": "Universe snapshot missing. Run jobs/daily_check.py or core/universe.py to build it.",
+        "warning": "Universe snapshot missing. Run jobs/watchlist_weekly.py or core/universe.py to build it.",
         **_bargain_fields(raw, factors, analyst, cfg),
     }
 
@@ -718,15 +781,23 @@ def _evaluate_good_buy(
     thresholds: dict,
     *,
     bargain_score: float | None = None,
+    factor_coverage_pct: float | None = None,
 ) -> bool:
     """
-    Good-buy gate: composite + bargain (+ optional sell-consensus filter).
+    Good-buy gate: composite + bargain + factor coverage
+    (+ optional sell-consensus filter).
+
+    The coverage gate stops thin data from producing confident scores: with
+    missing factor groups the composite renormalizes over whatever is left, so
+    a stock scored on 2 of 7 groups would otherwise look as trustworthy as one
+    scored on all 7. Rows without a coverage figure (None) are not blocked.
 
     Analyst implied upside is informational by default. Set
     ``require_implied_upside: true`` in config to restore the hard gate.
     """
     composite_min = float(thresholds.get("composite_min", 50))
     bargain_min = float(thresholds.get("bargain_min", 50))
+    coverage_min = float(thresholds.get("coverage_min_pct", 70))
     exclude_sell = bool(thresholds.get("exclude_sell_consensus", True))
     require_upside = bool(thresholds.get("require_implied_upside", False))
     upside_min = float(thresholds.get("implied_upside_min_pct", 15))
@@ -734,6 +805,8 @@ def _evaluate_good_buy(
     if composite is None or composite < composite_min:
         return False
     if bargain_score is None or bargain_score < bargain_min:
+        return False
+    if factor_coverage_pct is not None and factor_coverage_pct < coverage_min:
         return False
     if require_upside and (implied_upside is None or implied_upside < upside_min):
         return False

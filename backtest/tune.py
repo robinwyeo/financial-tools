@@ -422,6 +422,7 @@ def validate_bargain_weights(
     panel: pd.DataFrame | None = None,
     prices: pd.DataFrame | None = None,
     horizon: str = PRIMARY_EVAL_HORIZON,
+    results_dir: Path | None = None,
 ) -> dict[str, Any]:
     """
     Validate (not search) default long-horizon bargain weights via horizon IC.
@@ -467,8 +468,9 @@ def validate_bargain_weights(
         "baseline_mean_ic": default_ic,
         "candidates": results,
     }
-    path = RESULTS_DIR / "bargain_tuning_results.json"
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = results_dir if results_dir is not None else RESULTS_DIR
+    path = out_dir / "bargain_tuning_results.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2), encoding="utf-8")
     return out
 

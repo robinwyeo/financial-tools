@@ -191,8 +191,9 @@ def generate_report(output_path: Path | None = None) -> str:
         "",
         "## Caveats",
         "",
-        "- Residual survivorship bias: delisted tickers may lack price history in free data.",
-        "- `earnings_revisions` is live-only and excluded from historical validation.",
+        "- Survivorship bias: delisted tickers absent from free price data cannot be"
+        " selected at all, so strategy results are biased upward regardless of the"
+        " delist return assumption.",
         "- Analyst upside is informational (not a hard gate) and not historically backtested.",
         "- Expanding-window folds + bootstrap CIs reduce but do not eliminate path dependence.",
         "- SEC EDGAR fundamentals are point-in-time by filing date; reporting lags apply.",

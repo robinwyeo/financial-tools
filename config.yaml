@@ -2,8 +2,9 @@ universe:
   name: sp500
   sector_scoring: true
 thresholds:
-  composite_min: 57.3
+  composite_min: 57.5
   bargain_min: 49.4
+  coverage_min_pct: 70
   implied_upside_min_pct: 15
   require_implied_upside: false
   exclude_sell_consensus: true
@@ -12,14 +13,13 @@ factor_weights:
   garp: 0.1
   quality: 0.25
   balance_sheet: 0.1
-  momentum: 0.075
-  low_volatility: 0.05
+  momentum: 0.1
+  low_volatility: 0.075
   capital_discipline: 0.125
-  earnings_revisions: 0.05
 fund_factor_weights:
-  cost: 0.25
-  performance: 0.2
-  risk_adjusted: 0.2
+  cost: 0.35
+  performance: 0.15
+  risk_adjusted: 0.15
   low_volatility: 0.15
   momentum: 0.1
   income: 0.1

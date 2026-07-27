@@ -18,7 +18,8 @@ BACKTEST_END = date(2026, 3, 31)
 TRAIN_END = date(2018, 12, 31)
 VALID_END = date(2022, 12, 31)
 
-# Factor groups reconstructable without historical analyst data (7 of the 8 groups).
+# All composite factor groups are historically reconstructable (the live-only
+# earnings_revisions pseudo-factor was removed from the composite entirely).
 BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
     "value",
     "garp",
@@ -29,8 +30,7 @@ BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
     "capital_discipline",
 )
 
-# earnings_revisions requires live analyst rec history; excluded from historical tuning.
-EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset({"earnings_revisions"})
+EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset()
 
 # Long-horizon valuation bargain components (RSI removed).
 BARGAIN_BACKTEST_COMPONENTS: tuple[str, ...] = (
@@ -69,9 +69,8 @@ EVIDENCE_BASED_FACTOR_WEIGHTS: dict[str, float] = {
     "capital_discipline": 0.125,
     "balance_sheet": 0.10,
     "garp": 0.10,
-    "momentum": 0.075,
-    "low_volatility": 0.05,
-    "earnings_revisions": 0.05,
+    "momentum": 0.10,
+    "low_volatility": 0.075,
 }
 
 # Previous Dirichlet-tuned weights kept as a named comparison candidate.
@@ -83,21 +82,10 @@ LEGACY_TUNED_FACTOR_WEIGHTS: dict[str, float] = {
     "momentum": 0.0688,
     "low_volatility": 0.1321,
     "capital_discipline": 0.0667,
-    "earnings_revisions": 0.0500,
 }
 
 EQUAL_FACTOR_WEIGHTS: dict[str, float] = {
-    family: 1.0 / 8.0
-    for family in (
-        "value",
-        "garp",
-        "quality",
-        "balance_sheet",
-        "momentum",
-        "low_volatility",
-        "capital_discipline",
-        "earnings_revisions",
-    )
+    family: 1.0 / len(BACKTEST_FACTOR_FAMILIES) for family in BACKTEST_FACTOR_FAMILIES
 }
 
 DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {

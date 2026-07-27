@@ -48,4 +48,4 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        run: python jobs/daily_check.py
+        run: python jobs/watchlist_weekly.py

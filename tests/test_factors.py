@@ -5,7 +5,6 @@ import pandas as pd
 from core.analysts import recommendation_period_shift
 from core.factors import (
     compute_balance_sheet_strength,
-    compute_earnings_revisions,
     compute_piotroski_f_score,
     compute_shareholder_yield,
     compute_graham_value,
@@ -51,33 +50,19 @@ def test_shareholder_yield_ignores_acquisition_cashflow():
     assert result["net_buybacks"] is None
 
 
-def test_earnings_revisions_period_format():
-    recs = pd.DataFrame(
-        [
-            {"period": "0m", "strongBuy": 5, "buy": 10, "hold": 4, "sell": 0, "strongSell": 0},
-            {"period": "-1m", "strongBuy": 3, "buy": 8, "hold": 6, "sell": 1, "strongSell": 0},
-        ]
-    )
-    raw = {
-        "recommendations": recs,
-        "price": 100,
-        "target_mean": 110,
-    }
-    result = compute_earnings_revisions(raw)
-    assert result["earnings_revisions"] is not None
+def test_earnings_revisions_factor_removed():
+    """The unvalidated recommendation-scraping pseudo-factor is gone entirely."""
+    assert "earnings_revisions" not in FACTOR_SCORE_COLUMNS
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
+    assert "earnings_revisions" not in all_sub_cols
 
 
-def test_earnings_revisions_no_target_upside_blend():
-    """earnings_revisions must not include the analyst target price upside blend."""
-    # Stock with no rec history but a high target mean — score should be None
-    # (no double-counting with the analyst_upside good-buy gate).
-    raw = {
-        "recommendations": pd.DataFrame(),
-        "price": 100,
-        "target_mean": 150,  # 50% upside — must NOT flow into earnings_revisions
-    }
-    result = compute_earnings_revisions(raw)
-    assert result["earnings_revisions"] is None
+def test_graham_ratio_not_in_composite_value_group():
+    """graham_ratio drives the bargain score; keeping it out of the value group
+    prevents the same signal from being double-counted across both Buy gates."""
+    assert "graham_ratio" not in FACTOR_SCORE_COLUMNS["value"]
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
+    assert "graham_ratio" not in all_sub_cols
 
 
 def test_recommendation_period_shift_detects_upgrades():

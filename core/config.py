@@ -21,20 +21,21 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
 
 
 # Evidence-based priors for long-horizon buy-and-hold (validated, not searched).
+# earnings_revisions was dropped (it was recommendation-keyword scraping, never
+# historically validated); its 0.05 went to momentum/low_volatility.
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "quality": 0.25,
     "value": 0.25,
     "capital_discipline": 0.125,
     "balance_sheet": 0.10,
     "garp": 0.10,
-    "momentum": 0.075,
-    "low_volatility": 0.05,
-    "earnings_revisions": 0.05,
+    "momentum": 0.10,
+    "low_volatility": 0.075,
 }
 
 
 def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
-    """Return factor-group weights from config for the 8 composite groups only."""
+    """Return factor-group weights from config for the composite groups only."""
     cfg = config or load_config()
     weights = cfg.get("factor_weights", {})
     return {
@@ -43,13 +44,15 @@ def get_factor_weights(config: dict[str, Any] | None = None) -> dict[str, float]
     }
 
 
-# Fund (ETF / mutual fund) composite priors: fees are the strongest documented
-# predictor of long-run relative fund performance, then realized risk-adjusted
-# returns; momentum and income are supporting signals.
+# Fund (ETF / mutual fund) composite priors. Fees are the single robust
+# predictor of long-run relative fund performance, so cost dominates. Past
+# returns are a weak-to-negative predictor after fees (performance chasing),
+# so raw 3y/5y returns and the return/vol ratio are deliberately down-weighted.
+# Distribution yield is a payout preference, not a return signal.
 _DEFAULT_FUND_WEIGHTS: dict[str, float] = {
-    "cost": 0.25,
-    "performance": 0.20,
-    "risk_adjusted": 0.20,
+    "cost": 0.35,
+    "performance": 0.15,
+    "risk_adjusted": 0.15,
     "low_volatility": 0.15,
     "momentum": 0.10,
     "income": 0.10,
@@ -92,6 +95,9 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "composite_min": float(t.get("composite_min", 50.0)),
         "bargain_min": float(t.get("bargain_min", 50.0)),
+        # Minimum share of factor-group weight that must have data before a
+        # Buy is allowed (guards against renormalization over sparse data).
+        "coverage_min_pct": float(t.get("coverage_min_pct", 70.0)),
         # Informational only — not used as a hard good-buy gate.
         "implied_upside_min_pct": float(t.get("implied_upside_min_pct", 15)),
         "exclude_sell_consensus": bool(t.get("exclude_sell_consensus", True)),

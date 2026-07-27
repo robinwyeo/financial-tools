@@ -11,6 +11,7 @@ from core.scoring import (
     _merge_ticker_row_with_universe,
     apply_universe_snapshot_scoring,
     compute_bargain_score,
+    compute_fund_bargain_score,
     score_ticker,
     score_universe_df,
 )
@@ -31,13 +32,13 @@ def _minimal_config() -> dict:
 
 
 def _minimal_df() -> pd.DataFrame:
-    """Minimal universe dataframe with all sub-signal columns for the 8 factor groups."""
+    """Minimal universe dataframe with all sub-signal columns for the factor groups."""
     base = {
         "sector": "Tech",
         "earnings_yield": 0.08,
         "fcf_yield": 0.06,
         "book_to_market": 0.3,
-        "graham_ratio": 0.9,
+        "graham_ratio": 0.9,  # kept for the bargain score; not a composite sub-signal
         "garp": 1.5,
         "gross_profitability": 0.4,
         "roe": 0.15,
@@ -53,7 +54,6 @@ def _minimal_df() -> pd.DataFrame:
         "low_volatility": 8.0,
         "shareholder_yield": 0.03,
         "investment": -0.05,
-        "earnings_revisions": 1.0,
     }
     rows = []
     for i, ticker in enumerate(["AAA", "BBB", "CCC"]):
@@ -173,6 +173,67 @@ def test_compute_bargain_score_margin_of_safety_range():
     assert r_high["components"]["margin_of_safety"] == pytest.approx(100.0)
 
 
+# ---------------------------------------------------------------------------
+# Fund bargain score
+# ---------------------------------------------------------------------------
+
+def test_compute_fund_bargain_score_high_when_discounted_and_oversold():
+    """Deep 52W discount + oversold RSI → high bargain score."""
+    result = compute_fund_bargain_score(
+        price=70.0,
+        fifty_two_week_high=100.0,
+        rsi_14=25.0,
+    )
+    assert result["score"] is not None
+    assert result["score"] >= 80
+
+
+def test_compute_fund_bargain_score_low_when_near_high_and_overbought():
+    """Near 52W high + overbought RSI → low bargain score."""
+    result = compute_fund_bargain_score(
+        price=98.0,
+        fifty_two_week_high=100.0,
+        rsi_14=75.0,
+    )
+    assert result["score"] is not None
+    assert result["score"] < 20
+
+
+def test_compute_fund_bargain_score_renormalizes_missing_rsi():
+    """When RSI is missing, only 52W discount drives the score."""
+    result = compute_fund_bargain_score(
+        price=70.0,
+        fifty_two_week_high=100.0,
+        rsi_14=None,
+    )
+    assert result["score"] is not None
+    # 30% off 52W high → discount_52w = 100 (clamped), only component available
+    assert result["score"] == pytest.approx(100.0)
+
+
+def test_compute_fund_bargain_score_none_when_no_data():
+    result = compute_fund_bargain_score(
+        price=None,
+        fifty_two_week_high=None,
+        rsi_14=None,
+    )
+    assert result["score"] is None
+
+
+def test_compute_fund_bargain_score_components_keys():
+    result = compute_fund_bargain_score(price=80.0, fifty_two_week_high=100.0, rsi_14=50.0)
+    assert set(result["components"]) == {"discount_52w", "rsi_oversold"}
+
+
+def test_compute_fund_bargain_score_rsi_boundary():
+    """RSI exactly 30 → rsi_oversold = 100; RSI exactly 70 → rsi_oversold = 0."""
+    r_oversold = compute_fund_bargain_score(price=None, fifty_two_week_high=None, rsi_14=30.0)
+    assert r_oversold["components"]["rsi_oversold"] == pytest.approx(100.0)
+
+    r_overbought = compute_fund_bargain_score(price=None, fifty_two_week_high=None, rsi_14=70.0)
+    assert r_overbought["components"]["rsi_oversold"] == pytest.approx(0.0)
+
+
 def test_merge_ticker_row_keeps_snapshot_factors_when_live_row_empty():
     uni = pd.DataFrame(
         [
@@ -205,7 +266,7 @@ def test_merge_ticker_row_keeps_structural_factors_when_live_differs():
             {
                 "ticker": "COST",
                 "garp": 2.33,
-                "earnings_revisions": 0.33,
+                "roe": 0.33,
                 "momentum_12_1": -0.035,
             }
         ]
@@ -213,13 +274,13 @@ def test_merge_ticker_row_keeps_structural_factors_when_live_differs():
     live = {
         "ticker": "COST",
         "garp": 0.95,
-        "earnings_revisions": 0.0,
+        "roe": 0.0,
         "momentum_12_1": -0.009,
         "price": 955.0,
     }
     merged = _merge_ticker_row_with_universe(live, uni, "COST")
     assert merged["garp"] == 2.33
-    assert merged["earnings_revisions"] == 0.33
+    assert merged["roe"] == 0.33
     assert merged["momentum_12_1"] == pytest.approx(-0.009)
     assert merged["price"] == 955.0
 
@@ -304,6 +365,22 @@ def test_evaluate_good_buy_requires_composite_and_bargain_not_upside():
     assert _evaluate_good_buy(55, None, analyst, thresholds, bargain_score=60) is True
     assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=49) is False
     assert _evaluate_good_buy(55, 20, {"consensus_label": "Sell"}, thresholds, bargain_score=60) is False
+
+
+def test_evaluate_good_buy_coverage_gate():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "coverage_min_pct": 70,
+        "require_implied_upside": False,
+        "exclude_sell_consensus": True,
+    }
+    analyst = {"consensus_label": "Buy"}
+    common = dict(bargain_score=60)
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, factor_coverage_pct=100.0, **common) is True
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, factor_coverage_pct=69.9, **common) is False
+    # Rows without a coverage figure are not blocked (e.g. legacy snapshots).
+    assert _evaluate_good_buy(55, 20, analyst, thresholds, factor_coverage_pct=None, **common) is True
 
 
 def test_evaluate_good_buy_optional_upside_gate():

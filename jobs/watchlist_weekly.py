@@ -75,12 +75,12 @@ def run_daily(
             tickers = fetch_sp500_tickers()
         build_universe_snapshot(tickers=tickers, max_tickers=max_universe)
     else:
-        logger.info("Skipping universe refresh (watchlist-only run; use --refresh or weekly_check.py to rebuild)")
+        logger.info("Skipping universe refresh (watchlist-only run; use --refresh or universe_monthly.py to rebuild)")
 
     uni = load_universe_snapshot()
     if uni is None or uni.empty:
         logger.error(
-            "Universe snapshot is empty. Run `python jobs/weekly_check.py` or "
+            "Universe snapshot is empty. Run `python jobs/universe_monthly.py` or "
             "`python -m core.universe` first, or pass --refresh."
         )
         return 1
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="Rebuild universe snapshot first (slow; normally done by weekly_check.py)",
+        help="Rebuild universe snapshot first (slow; normally done by universe_monthly.py)",
     )
     parser.add_argument(
         "--max-universe",

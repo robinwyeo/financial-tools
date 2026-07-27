@@ -64,7 +64,9 @@ def test_all_score_columns_are_computed():
 def test_fund_weights_default_and_config_override():
     defaults = get_fund_factor_weights({})
     assert set(defaults) == set(FUND_FACTOR_SCORE_COLUMNS)
-    assert defaults["cost"] == 0.25
+    # Fees dominate: the one robust predictor of long-run relative fund returns.
+    assert defaults["cost"] == 0.35
+    assert defaults["cost"] > defaults["performance"]
     custom = get_fund_factor_weights({"fund_factor_weights": {"cost": 0.5}})
     assert custom["cost"] == 0.5
 

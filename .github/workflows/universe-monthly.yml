@@ -49,7 +49,7 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        run: python jobs/weekly_check.py
+        run: python jobs/universe_monthly.py
 
       - name: Commit updated snapshot
         run: |

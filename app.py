@@ -406,7 +406,7 @@ def _pct_below_high(price: float | None, high: float | None) -> float | None:
     return max(0.0, 1.0 - (price / high))
 
 
-def _plotly_chart(fig: go.Figure, *, height: int) -> None:
+def _plotly_chart(fig: go.Figure, *, height: int, extra_css: str = "") -> None:
     """Render a Plotly figure without Streamlit's PlotlyChart JS chunk.
 
     Streamlit Community Cloud sometimes serves the SPA index.html for
@@ -415,13 +415,14 @@ def _plotly_chart(fig: go.Figure, *, height: int) -> None:
     loads Plotly from its CDN inside an iframe and avoids that path.
     """
     fig.update_layout(autosize=True, height=height)
+    style = f"<style>{extra_css}</style>" if extra_css else ""
     chart_html = fig.to_html(
         include_plotlyjs="cdn",
         full_html=False,
-        config={"displayModeBar": False, "responsive": True},
+        config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
     )
     components.html(
-        f'<div style="width:100%;height:{height}px;">{chart_html}</div>',
+        f'<div style="width:100%;height:{height}px;">{style}{chart_html}</div>',
         height=height,
         scrolling=False,
     )
@@ -579,6 +580,60 @@ def inject_css() -> None:
             margin-top: 0.4rem;
             padding: 0.45rem 0 0.55rem;
             border-top: 1px solid #e5e7eb;
+        }
+        /* Google Finance-style timeframe tabs (widget key prefix ph-range-). */
+        div[class*="st-key-ph-range"] {
+            width: 100% !important;
+            margin-top: -0.15rem;
+            margin-bottom: 0.1rem;
+        }
+        div[class*="st-key-ph-range"] [data-testid="stWidgetLabel"] {
+            display: none !important;
+        }
+        div[class*="st-key-ph-range"] [data-testid="stRadioGroup"],
+        div[class*="st-key-ph-range"] div[role="radiogroup"] {
+            gap: 0 !important;
+            flex-wrap: nowrap !important;
+            justify-content: space-between !important;
+            width: 100%;
+            border-bottom: 1px solid #e8eaed;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"] {
+            flex: 1 1 0;
+            justify-content: center !important;
+            padding: 0.12rem 0.2rem 0.28rem !important;
+            margin: 0 !important;
+            border-right: 1px solid #e8eaed;
+            border-bottom: 3px solid transparent;
+            border-radius: 0 !important;
+            background: transparent !important;
+            min-height: 0 !important;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"]:last-child {
+            border-right: none;
+        }
+        /* Hide the Streamlit radio circle (nested inside the option, after the visually-hidden input). */
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"] > div > div > div:first-child {
+            display: none !important;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"] p {
+            font-size: 0.74rem !important;
+            font-weight: 500 !important;
+            color: #5f6368 !important;
+            letter-spacing: 0.01em;
+            text-align: center;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"]:hover p {
+            color: #202124 !important;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"]:has(input:checked),
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"][data-selected="true"] {
+            border-bottom-color: #1a73e8;
+        }
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"]:has(input:checked) p,
+        div[class*="st-key-ph-range"] label[data-testid="stRadioOption"][data-selected="true"] p {
+            color: #1a73e8 !important;
+            font-weight: 600 !important;
         }
         .factor-radar-card .dashboard-chart-slot {
             flex: 0 0 auto;
@@ -1188,100 +1243,182 @@ def _price_position_strip_html(analysis: dict) -> str:
     )
 
 
+_PRICE_UP = "#188038"
+_PRICE_DOWN = "#d93025"
+_PRICE_CHART_HOVER_CSS = """
+.js-plotly-plot .hoverlayer .hovertext {
+    filter: drop-shadow(0 1px 4px rgba(60, 64, 67, 0.18));
+}
+"""
+
+
+def _price_hover_label(ts, price: float, currency_code: str) -> str:
+    """Google Finance-style hover text, e.g. ``183.91 USD Thu, Apr 9``."""
+    t = pd.Timestamp(ts)
+    return f"{price:.2f} {currency_code} {t.strftime('%a, %b')} {t.day}"
+
+
+def _price_history_figure(
+    hist: pd.DataFrame,
+    *,
+    currency_code: str,
+    range_label: str,
+) -> go.Figure:
+    """Area chart styled after Google Finance price history."""
+    closes = hist["Close"].astype(float)
+    x = hist.index
+    first = float(closes.iloc[0])
+    last = float(closes.iloc[-1])
+    up = last >= first
+    line_color = _PRICE_UP if up else _PRICE_DOWN
+    fill_top = "rgba(24, 128, 56, 0.20)" if up else "rgba(217, 48, 37, 0.20)"
+    fill_bottom = "rgba(24, 128, 56, 0.0)" if up else "rgba(217, 48, 37, 0.0)"
+
+    y_min = float(closes.min())
+    y_max = float(closes.max())
+    pad = (y_max - y_min) * 0.12 if y_max > y_min else max(abs(y_max) * 0.05, 1.0)
+    axis_min = y_min - pad
+    axis_max = y_max + pad
+
+    if range_label in {"1M", "3M"}:
+        tickformat = "%b %d"
+    elif range_label in {"5Y", "All"}:
+        tickformat = "%Y"
+    else:
+        tickformat = "%b %Y"
+
+    hover_labels = [
+        _price_hover_label(ts, float(price), currency_code)
+        for ts, price in zip(x, closes)
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=[axis_min] * len(closes),
+            mode="lines",
+            line=dict(width=0, color="rgba(0,0,0,0)"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=closes,
+            mode="lines",
+            line=dict(color=line_color, width=1.8, shape="linear"),
+            fill="tonexty",
+            fillgradient=dict(
+                type="vertical",
+                colorscale=[[0.0, fill_bottom], [1.0, fill_top]],
+            ),
+            marker=dict(size=8, color=line_color, line=dict(width=1.5, color="#fff")),
+            customdata=hover_labels,
+            hovertemplate="%{customdata}<extra></extra>",
+            showlegend=False,
+            name="",
+        )
+    )
+    fig.update_layout(
+        template="simple_white",
+        height=CHART_HEIGHT_PRICE,
+        margin=dict(l=36, r=8, t=12, b=28),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Arial, Helvetica, sans-serif", color="#80868b"),
+        showlegend=False,
+        hovermode="x",
+        spikedistance=-1,
+        hoverdistance=40,
+        hoverlabel=dict(
+            bgcolor="#fff",
+            bordercolor="#dadce0",
+            font=dict(size=12, color="#202124", family="Arial, Helvetica, sans-serif"),
+            align="left",
+        ),
+        xaxis=dict(
+            showgrid=False,
+            showline=True,
+            linewidth=1,
+            linecolor="#dadce0",
+            mirror=False,
+            ticks="",
+            tickformat=tickformat,
+            nticks=5,
+            tickfont=dict(size=11, color="#80868b"),
+            rangeslider=dict(visible=False),
+            fixedrange=True,
+            showspikes=True,
+            spikemode="across+marker",
+            spikecolor="#9aa0a6",
+            spikethickness=1,
+            spikedash="dash",
+            spikesnap="hovered data",
+        ),
+        yaxis=dict(
+            range=[axis_min, axis_max],
+            showgrid=True,
+            gridcolor="#e8eaed",
+            gridwidth=1,
+            zeroline=False,
+            showline=False,
+            ticks="",
+            nticks=5,
+            tickfont=dict(size=11, color="#80868b"),
+            fixedrange=True,
+            showspikes=False,
+        ),
+        dragmode=False,
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(zeroline=False, showline=False)
+    return fig
+
+
 def render_price_history_card(
     analysis: dict,
     *,
     bordered: bool = True,
     currency: str | None = None,
-    line_only: bool = False,
 ) -> None:
     ticker = analysis.get("ticker", "")
+    currency_code = (currency or analysis.get("currency") or "USD").upper()
     with _card_shell(bordered):
         st.markdown('<div class="dashboard-card-body price-history-card">', unsafe_allow_html=True)
-        header_col, range_col = st.columns([3, 2])
-        with header_col:
-            st.markdown(
-                '<div style="font-size:0.92rem;font-weight:700;color:#1e3a5f;padding-top:5px;">'
-                "Price History</div>",
-                unsafe_allow_html=True,
-            )
-        with range_col:
-            selected = st.selectbox(
-                "Timeframe",
-                options=list(PRICE_HISTORY_RANGES.keys()),
-                index=list(PRICE_HISTORY_RANGES.keys()).index(DEFAULT_PRICE_RANGE),
-                label_visibility="collapsed",
-                key=f"ph_{ticker}",
-            )
+        st.markdown(
+            '<div style="font-size:0.92rem;font-weight:700;color:#1e3a5f;padding-top:2px;'
+            'padding-bottom:0.15rem;">Price History</div>',
+            unsafe_allow_html=True,
+        )
+        selected = st.radio(
+            "Timeframe",
+            options=list(PRICE_HISTORY_RANGES.keys()),
+            index=list(PRICE_HISTORY_RANGES.keys()).index(DEFAULT_PRICE_RANGE),
+            horizontal=True,
+            label_visibility="collapsed",
+            key=f"ph-range-{ticker}",
+        )
 
         period = PRICE_HISTORY_RANGES[selected]
         hist = fetch_price_history(ticker, period=period)
-        if hist.empty:
+        if hist.empty or "Close" not in hist.columns:
             st.info("No price history available for this timeframe.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
-        fig = go.Figure()
-
-        # Mutual funds only publish daily NAV (Open == High == Low == Close),
-        # so candlesticks render as flat bars — use the line trace alone.
-        if not line_only and all(c in hist.columns for c in ["Open", "High", "Low", "Close"]):
-            fig.add_trace(
-                go.Candlestick(
-                    x=hist.index,
-                    open=hist["Open"],
-                    high=hist["High"],
-                    low=hist["Low"],
-                    close=hist["Close"],
-                    name="Price",
-                    increasing=dict(line=dict(color="#10b981", width=1), fillcolor="#10b981"),
-                    decreasing=dict(line=dict(color="#ef4444", width=1), fillcolor="#ef4444"),
-                )
-            )
-
-        ma20 = hist["Close"].rolling(20).mean()
-        fig.add_trace(
-            go.Scatter(
-                x=hist.index,
-                y=ma20,
-                mode="lines",
-                line=dict(color="#3b82f6", width=1.5),
-                name="Close Price",
-                opacity=0.85,
-            )
-        )
-
-        fig.update_layout(
-            height=CHART_HEIGHT_PRICE,
-            margin=dict(l=10, r=10, t=16, b=14),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            legend=dict(
-                orientation="h",
-                y=1.06,
-                x=0,
-                font=dict(size=10, color="#6b7280"),
-                bgcolor="rgba(0,0,0,0)",
-            ),
-            xaxis=dict(
-                showgrid=False,
-                tickfont=dict(size=10, color="#9ca3af"),
-                rangeslider=dict(visible=False),
-                spikecolor="#94a3b8",
-                spikethickness=1,
-                spikesnap="cursor",
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor="#f3f4f6",
-                gridwidth=1,
-                tickfont=dict(size=10, color="#9ca3af"),
-                tickprefix=currency_symbol(currency),
-            ),
-            hovermode="x unified",
+        fig = _price_history_figure(
+            hist,
+            currency_code=currency_code,
+            range_label=selected,
         )
         st.markdown('<div class="dashboard-chart-slot">', unsafe_allow_html=True)
-        _plotly_chart(fig, height=CHART_HEIGHT_PRICE)
+        _plotly_chart(
+            fig,
+            height=CHART_HEIGHT_PRICE,
+            extra_css=_PRICE_CHART_HOVER_CSS,
+        )
         st.markdown(
             _price_position_strip_html(analysis) + "</div></div>",
             unsafe_allow_html=True,
@@ -1677,7 +1814,6 @@ def render_fund_view(
         st.warning(analysis["warning"])
 
     currency = analysis.get("currency")
-    is_mutual_fund = analysis.get("security_type") == "MUTUALFUND"
 
     # Fund header card
     with st.container(border=True):
@@ -1711,7 +1847,6 @@ def render_fund_view(
             analysis,
             bordered=False,
             currency=currency,
-            line_only=is_mutual_fund,
         )
     with row2_c:
         render_factor_radar_card(

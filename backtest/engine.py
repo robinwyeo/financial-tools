@@ -28,13 +28,10 @@ from backtest.constants import (
 from backtest.data.prices import BENCHMARK_TICKER, load_delisted_catalog, load_prices
 from backtest.factors import load_factor_panel
 from backtest.weights import normalize_backtest_weights
-from core.factors import FACTOR_SCORE_COLUMNS
+from core.factors import FACTOR_SCORE_COLUMNS, FACTOR_SUB_BUCKETS
 from core.scoring import (
     _composite_and_coverage,
-    _score_column,
-    cross_sectional_zscore,
-    winsorize,
-    zscore_to_percentile,
+    compute_family_percentile,
 )
 
 # Shared caches reused across tuning iterations.
@@ -111,19 +108,12 @@ def _score_panel_quarter(
 
     for family in BACKTEST_FACTOR_FAMILIES:
         cols = FACTOR_SCORE_COLUMNS.get(family, [])
-        sub_series: list[pd.Series] = []
-        for col in cols:
-            if col not in result.columns:
-                continue
-            if group_col:
-                z = _score_column(result, col, group_col)
-            else:
-                z = cross_sectional_zscore(winsorize(result[col]))
-            sub_series.append(z.apply(zscore_to_percentile))
-        if sub_series:
-            result[f"pct_{family}"] = pd.concat(sub_series, axis=1).mean(axis=1, skipna=True)
-        else:
-            result[f"pct_{family}"] = np.nan
+        result[f"pct_{family}"] = compute_family_percentile(
+            result,
+            cols,
+            group_col=group_col,
+            buckets=FACTOR_SUB_BUCKETS.get(family),
+        )
 
     composites = []
     for _, row in result.iterrows():

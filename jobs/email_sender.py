@@ -116,6 +116,9 @@ def format_scorecard_email(
     <p style="color:#6b7280;font-size:14px;">
     Buy criteria: composite &ge; {thresholds['composite_min']},
     bargain &ge; {thresholds['bargain_min']},
+    Altman Z &ge; {thresholds.get('altman_z_min', 1.8)} (no distress),
+    high uncertainty widens both hurdles by
+    {thresholds.get('uncertainty_high_bump', 6):.0f},
     consensus not Sell.
     Analyst upside is shown for context (not a hard gate).
     </p>

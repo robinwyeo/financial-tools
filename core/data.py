@@ -545,6 +545,15 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     fin = fetch_financials(ticker)
     hist = fetch_price_history(ticker, period="2y")
     recs = fetch_analyst_recommendations(ticker)
+    from core.estimates import fetch_estimate_tables
+    from core.insiders import fetch_form4_transactions
+
+    estimate_tables = fetch_estimate_tables(ticker)
+    try:
+        form4_transactions = fetch_form4_transactions(ticker)
+    except Exception as exc:
+        logger.warning("Form 4 fetch failed for %s: %s", ticker, exc)
+        form4_transactions = []
 
     price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice"))
     if price is None and not hist.empty and "Close" in hist.columns:
@@ -712,6 +721,11 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "rsi_14": rsi_14,
         "earnings_yield_current": current_ey,
         "exchange": exchange,
+        "estimate_tables": estimate_tables,
+        "form4_transactions": form4_transactions,
+        "short_ratio": _safe_float(info.get("shortRatio")),
+        "short_percent_of_float": _safe_float(info.get("shortPercentOfFloat")),
+        "shares_short": _safe_float(info.get("sharesShort")),
         "data_warnings": data_warnings,
     }
 
@@ -982,11 +996,22 @@ def compute_valuation_vs_history(
     ticker: str,
     current_earnings_yield: float | None,
     *,
-    years: int = 5,
+    years: int = 10,
+    current_ocf_yield: float | None = None,
+    current_book_to_market: float | None = None,
 ) -> float | None:
-    """Current EY percentile within the stock's own trailing history (0-100)."""
-    history = build_earnings_yield_history(ticker, years=years)
-    return percentile_rank_in_history(current_earnings_yield, history)
+    """Current cheapness percentile vs own 10y EDGAR history (Yahoo fallback)."""
+    from core.edgar_history import compute_valuation_vs_history_detail
+
+    detail = compute_valuation_vs_history_detail(
+        ticker,
+        current_earnings_yield,
+        current_ocf_yield=current_ocf_yield,
+        current_book_to_market=current_book_to_market,
+        years=years,
+    )
+    score = detail.get("score")
+    return float(score) if score is not None else None
 
 
 def throttle(seconds: float = 0.3) -> None:

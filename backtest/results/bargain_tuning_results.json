@@ -3,31 +3,31 @@
   "horizon": "3y",
   "winner_name": "default_long_horizon",
   "winner_weights": {
-    "margin_of_safety": 0.4,
-    "valuation_vs_history": 0.35,
-    "discount_52w": 0.25
+    "margin_of_safety": 0.55,
+    "valuation_vs_history": 0.3,
+    "discount_52w": 0.15
   },
-  "winner_mean_ic": 0.007960552004662613,
+  "winner_mean_ic": 0.014977062476788743,
   "baseline_weights": {
-    "margin_of_safety": 0.4,
-    "valuation_vs_history": 0.35,
-    "discount_52w": 0.25
+    "margin_of_safety": 0.55,
+    "valuation_vs_history": 0.3,
+    "discount_52w": 0.15
   },
-  "baseline_mean_ic": 0.007960552004662613,
+  "baseline_mean_ic": 0.014977062476788743,
   "candidates": {
     "default_long_horizon": {
       "weights": {
-        "margin_of_safety": 0.4,
-        "valuation_vs_history": 0.35,
-        "discount_52w": 0.25
+        "margin_of_safety": 0.55,
+        "valuation_vs_history": 0.3,
+        "discount_52w": 0.15
       },
       "horizon_ics": {
-        "1q": 0.013835703407483175,
-        "1y": 0.01114564410046695,
-        "3y": 0.007960552004662613,
-        "5y": 0.01240813108494166
+        "1q": 0.012418151815213175,
+        "1y": 0.011092422809119961,
+        "3y": 0.014977062476788743,
+        "5y": 0.021238932968357372
       },
-      "primary_ic": 0.007960552004662613
+      "primary_ic": 0.014977062476788743
     },
     "graham_heavy": {
       "weights": {
@@ -36,12 +36,12 @@
         "discount_52w": 0.15
       },
       "horizon_ics": {
-        "1q": 0.013316551103325839,
-        "1y": 0.012290930957472836,
-        "3y": 0.01615535363794999,
-        "5y": 0.021748852307906807
+        "1q": 0.012418151815213175,
+        "1y": 0.011092422809119961,
+        "3y": 0.014977062476788743,
+        "5y": 0.021238932968357372
       },
-      "primary_ic": 0.01615535363794999
+      "primary_ic": 0.014977062476788743
     },
     "equal": {
       "weights": {
@@ -50,12 +50,12 @@
         "discount_52w": 0.3333333333333333
       },
       "horizon_ics": {
-        "1q": 0.013838582463892104,
-        "1y": 0.010607260531073127,
-        "3y": 0.0012832532738818387,
-        "5y": 0.0038716771862673353
+        "1q": 0.012813089258974914,
+        "1y": 0.009172399802177999,
+        "3y": 0.00013422251303267676,
+        "5y": 0.003347373560217754
       },
-      "primary_ic": 0.0012832532738818387
+      "primary_ic": 0.00013422251303267676
     }
   }
 }

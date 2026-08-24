@@ -18,8 +18,8 @@ BACKTEST_END = date(2026, 3, 31)
 TRAIN_END = date(2018, 12, 31)
 VALID_END = date(2022, 12, 31)
 
-# All composite factor groups are historically reconstructable (the live-only
-# earnings_revisions pseudo-factor was removed from the composite entirely).
+# Reconstructable groups only. estimate_revisions and insider are live-only
+# (need analyst estimate history / Form 4 that the EDGAR panel does not have).
 BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
     "value",
     "garp",
@@ -30,7 +30,10 @@ BACKTEST_FACTOR_FAMILIES: tuple[str, ...] = (
     "capital_discipline",
 )
 
-EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset()
+EXCLUDED_COMPOSITE_FACTORS: frozenset[str] = frozenset({
+    "estimate_revisions",
+    "insider",
+})
 
 # Long-horizon valuation bargain components (RSI removed).
 BARGAIN_BACKTEST_COMPONENTS: tuple[str, ...] = (
@@ -64,13 +67,13 @@ WITHIN_THEME_PROPORTIONS: dict[str, dict[str, float]] = {
 
 # Evidence-based priors for long-horizon buy-and-hold (research-backed).
 EVIDENCE_BASED_FACTOR_WEIGHTS: dict[str, float] = {
-    "quality": 0.25,
+    "quality": 0.225,
     "value": 0.25,
-    "capital_discipline": 0.125,
+    "capital_discipline": 0.10,
     "balance_sheet": 0.10,
-    "garp": 0.10,
+    "garp": 0.05,
     "momentum": 0.10,
-    "low_volatility": 0.075,
+    "low_volatility": 0.05,
 }
 
 # Previous Dirichlet-tuned weights kept as a named comparison candidate.
@@ -88,10 +91,12 @@ EQUAL_FACTOR_WEIGHTS: dict[str, float] = {
     family: 1.0 / len(BACKTEST_FACTOR_FAMILIES) for family in BACKTEST_FACTOR_FAMILIES
 }
 
+# graham_heavy: validated winner in bargain_tuning_results.json (~2x 3y/5y IC
+# vs the previous 0.40/0.35/0.25 default).
 DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.40,
-    "valuation_vs_history": 0.35,
-    "discount_52w": 0.25,
+    "margin_of_safety": 0.55,
+    "valuation_vs_history": 0.30,
+    "discount_52w": 0.15,
 }
 
 # Forward-return horizons in quarters (1y / 3y / 5y) plus next-quarter.
@@ -110,7 +115,7 @@ DCA_INVESTMENT_USD = 20_000.0
 DCA_TOP_N = 5
 DEFAULT_DELIST_RETURN = -0.50
 TRANSACTION_COST_BPS = 10.0  # ~10 bps per buy
-VALUATION_HISTORY_QUARTERS = 20  # 5 years of trailing EY history
+VALUATION_HISTORY_QUARTERS = 40  # 10 years of trailing EY history
 BOOTSTRAP_N = 1000
 BOOTSTRAP_CI = 0.95
 

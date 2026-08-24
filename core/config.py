@@ -24,13 +24,15 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
 # earnings_revisions was dropped (it was recommendation-keyword scraping, never
 # historically validated); its 0.05 went to momentum/low_volatility.
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "quality": 0.25,
+    "quality": 0.225,
     "value": 0.25,
-    "capital_discipline": 0.125,
+    "capital_discipline": 0.10,
     "balance_sheet": 0.10,
-    "garp": 0.10,
+    "garp": 0.05,
     "momentum": 0.10,
-    "low_volatility": 0.075,
+    "low_volatility": 0.05,
+    "estimate_revisions": 0.10,
+    "insider": 0.025,
 }
 
 
@@ -69,11 +71,13 @@ def get_fund_factor_weights(config: dict[str, Any] | None = None) -> dict[str, f
     }
 
 
-# Long-horizon valuation bargain defaults (RSI removed).
+# Long-horizon valuation bargain defaults (RSI removed). graham_heavy weights:
+# validated in backtest/results/bargain_tuning_results.json with ~2x the 3y/5y
+# rank IC of the previous 0.40/0.35/0.25 default.
 _DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.40,
-    "valuation_vs_history": 0.35,
-    "discount_52w": 0.25,
+    "margin_of_safety": 0.55,
+    "valuation_vs_history": 0.30,
+    "discount_52w": 0.15,
 }
 
 _BARGAIN_COMPONENT_KEYS: tuple[str, ...] = tuple(_DEFAULT_BARGAIN_WEIGHTS.keys())
@@ -98,6 +102,16 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
         # Minimum share of factor-group weight that must have data before a
         # Buy is allowed (guards against renormalization over sparse data).
         "coverage_min_pct": float(t.get("coverage_min_pct", 70.0)),
+        # Hard distress disqualifier: Altman Z below this blocks a Buy outright
+        # (1.8 = classic distress-zone boundary). Missing Z never blocks.
+        "altman_z_min": float(t.get("altman_z_min", 1.8)),
+        "uncertainty_medium_bump": float(t.get("uncertainty_medium_bump", 3.0)),
+        "uncertainty_high_bump": float(t.get("uncertainty_high_bump", 6.0)),
+        "uncertainty_coverage_max": float(t.get("uncertainty_coverage_max", 80.0)),
+        "uncertainty_vol_min": float(t.get("uncertainty_vol_min", 0.35)),
+        "uncertainty_dispersion_min": float(t.get("uncertainty_dispersion_min", 0.40)),
+        "short_interest_days_min": float(t.get("short_interest_days_min", 5.0)),
+        "short_interest_float_pct_min": float(t.get("short_interest_float_pct_min", 0.10)),
         # Informational only — not used as a hard good-buy gate.
         "implied_upside_min_pct": float(t.get("implied_upside_min_pct", 15)),
         "exclude_sell_consensus": bool(t.get("exclude_sell_consensus", True)),

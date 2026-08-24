@@ -81,11 +81,13 @@ FACTOR_LABELS = {
     "momentum": "Momentum (12-1)",
     "low_volatility": "Low Volatility",
     "capital_discipline": "Capital Discipline (yield + asset growth)",
+    "estimate_revisions": "Estimate Revisions (agreement · magnitude · surprise)",
+    "insider": "Insider Buying (net Form 4 open-market)",
 }
 
 BARGAIN_LABELS = {
     "margin_of_safety": "Margin of Safety (Graham)",
-    "valuation_vs_history": "Valuation vs Own History (≈5y, data permitting)",
+    "valuation_vs_history": "Valuation vs Own History (10y EDGAR)",
     "discount_52w": "Discount to 52-Week High",
 }
 
@@ -97,6 +99,8 @@ SHORT_FACTOR_LABELS = {
     "momentum": "Momentum",
     "low_volatility": "Low Volatility",
     "capital_discipline": "Capital Discipline",
+    "estimate_revisions": "Est. Revisions",
+    "insider": "Insider Buying",
 }
 
 # Short labels for the radar chart (one spoke per factor group).
@@ -108,6 +112,8 @@ RADAR_FACTOR_LABELS: dict[str, str] = {
     "momentum":           "Momentum",
     "low_volatility":     "Low Vol",
     "capital_discipline": "Cap. Disc.",
+    "estimate_revisions": "Revisions",
+    "insider":            "Insiders",
 }
 
 # Factor Scorecard display: 2 groups per column.
@@ -115,8 +121,8 @@ RADAR_FACTOR_LABELS: dict[str, str] = {
 FACTOR_SCORECARD_GROUPS: list[tuple[str, str, list[str]]] = [
     ("Valuation", "#14b8a6", ["value", "garp"]),
     ("Quality & Health", "#8b5cf6", ["quality", "balance_sheet"]),
-    ("Returns & Capital", "#3b82f6", ["capital_discipline", "momentum"]),
-    ("Market Behavior", "#f59e0b", ["low_volatility"]),
+    ("Capital & Insiders", "#3b82f6", ["capital_discipline", "insider"]),
+    ("Market & Estimates", "#f59e0b", ["momentum", "low_volatility", "estimate_revisions"]),
 ]
 
 FACTOR_COLORS = {
@@ -127,6 +133,8 @@ FACTOR_COLORS = {
     "momentum":           "#3b82f6",
     "low_volatility":     "#f59e0b",
     "capital_discipline": "#34d399",
+    "estimate_revisions": "#f97316",
+    "insider":            "#0ea5e9",
 }
 
 # ── Fund (ETF / mutual fund) factor display ──────────────────────────────────
@@ -296,9 +304,19 @@ FACTOR_HELP: dict[str, str] = {
         "Falls back to 1/PEG when analyst growth estimates are unavailable."
     ),
     "quality": (
-        "Composite quality rank: seven sub-signals (gross profitability, ROE, ROA, "
-        "profit margin, ROIC, earnings quality/accruals, Piotroski F-Score) are each "
-        "ranked then averaged. Higher = more profitable and cleaner business."
+        "Composite quality rank in three de-correlated buckets: profitability "
+        "(gross profitability, ROE, ROA, margin, ROIC), earnings quality (accruals), "
+        "and financial strength (Piotroski). Higher = more profitable and cleaner business."
+    ),
+    "estimate_revisions": (
+        "Zacks-style estimate-revision rank: revision agreement (% of FY1/FY2 "
+        "upgrades), revision magnitude (90-day consensus EPS change), and the last "
+        "quarterly earnings surprise. Higher = analysts are revising earnings up."
+    ),
+    "insider": (
+        "Net open-market Form 4 buying (purchases minus sales) over the last 90 days "
+        "as a fraction of market cap, ranked vs peers. Cluster buys by multiple "
+        "officers also show as a badge. Grants and option exercises are excluded."
     ),
     "balance_sheet": (
         "Composite balance-sheet rank: net cash / market cap, low debt-to-equity "
@@ -1028,6 +1046,41 @@ def _format_snapshot_date(raw_date: str | None) -> str | None:
     return raw_date[:10] if len(raw_date) >= 10 else raw_date
 
 
+def _sparkline_svg(values: list[float], *, width: int = 128, height: int = 28) -> str:
+    if len(values) < 2:
+        return ""
+    lo, hi = min(values), max(values)
+    span = hi - lo if hi != lo else 1.0
+    pts: list[str] = []
+    for i, val in enumerate(values):
+        x = 1 + i / (len(values) - 1) * (width - 2)
+        y = height - 2 - ((val - lo) / span) * (height - 4)
+        pts.append(f"{x:.1f},{y:.1f}")
+    color = "#16a34a" if values[-1] >= values[0] else "#dc2626"
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'aria-label="FY1 EPS estimate trend">'
+        f'<polyline fill="none" stroke="{color}" stroke-width="1.8" '
+        f'points="{" ".join(pts)}"/></svg>'
+    )
+
+
+def _signal_badge(label: str, tone: str) -> str:
+    colors = {
+        "success": ("#166534", "#dcfce7"),
+        "warning": ("#92400e", "#fef3c7"),
+        "danger": ("#991b1b", "#fee2e2"),
+        "info": ("#1e3a5f", "#e0e7ff"),
+        "neutral": ("#374151", "#f3f4f6"),
+    }
+    fg, bg = colors.get(tone, colors["neutral"])
+    return (
+        f'<span style="display:inline-block;margin:0 6px 6px 0;padding:2px 8px;'
+        f'border-radius:999px;font-size:0.72rem;font-weight:700;'
+        f'color:{fg};background:{bg};">{html.escape(label)}</span>'
+    )
+
+
 def render_composite_card(
     analysis: dict,
     *,
@@ -1076,6 +1129,49 @@ def render_composite_card(
         else ""
     )
 
+    uncertainty = analysis.get("uncertainty") or {}
+    unc_label = uncertainty.get("label")
+    unc_tone = {"Low": "success", "Medium": "warning", "High": "danger"}.get(unc_label, "neutral")
+    badges = []
+    if unc_label:
+        bump = uncertainty.get("threshold_bump") or 0
+        bump_txt = f" · +{bump:.0f} buy hurdle" if bump else ""
+        badges.append(_signal_badge(f"Uncertainty: {unc_label}{bump_txt}", unc_tone))
+    insider = analysis.get("insider") or {}
+    if insider.get("cluster_buy"):
+        n_buyers = insider.get("buyers_90d") or 0
+        badges.append(_signal_badge(f"Insider cluster buy ({n_buyers} officers, 90d)", "success"))
+    short = analysis.get("short_interest") or {}
+    if short.get("high_short_interest"):
+        days = short.get("short_ratio")
+        days_txt = f"{days:.1f}d to cover" if days is not None else "elevated"
+        badges.append(_signal_badge(f"High short interest · {days_txt}", "warning"))
+    hist = analysis.get("valuation_history") or {}
+    if hist.get("source") and hist.get("n_points"):
+        metric = hist.get("metric") or "yield"
+        badges.append(
+            _signal_badge(
+                f"History: {hist.get('n_points')} pts · {metric} · {hist.get('source')}",
+                "info",
+            )
+        )
+    badge_html = (
+        f'<div style="text-align:center;margin-top:0.45rem;">{"".join(badges)}</div>'
+        if badges
+        else ""
+    )
+
+    spark = analysis.get("eps_trend_sparkline") or []
+    spark_html = ""
+    if len(spark) >= 2:
+        spark_html = (
+            '<div style="text-align:center;margin-top:0.35rem;">'
+            '<div style="font-size:0.68rem;color:#6b7280;letter-spacing:0.04em;'
+            'text-transform:uppercase;">FY1 consensus EPS (90d → now)</div>'
+            + _sparkline_svg([float(v) for v in spark])
+            + "</div>"
+        )
+
     with _card_shell(bordered):
         st.markdown(
             '<div class="dashboard-card-body composite-score-card">'
@@ -1088,7 +1184,10 @@ def render_composite_card(
             '<div class="gauge-title">Bargain Score</div>'
             + bargain_gauge
             + rsi_note
-            + "</div></div></div>",
+            + "</div></div>"
+            + badge_html
+            + spark_html
+            + "</div>",
             unsafe_allow_html=True,
         )
 
@@ -1903,10 +2002,25 @@ def render_stock_view(
                 st.warning(w)
 
     thresholds = get_thresholds(config)
+    if analysis.get("distress_flag"):
+        altman_z = analysis.get("altman_z")
+        z_txt = f"{altman_z:.2f}" if altman_z is not None else "n/a"
+        st.error(
+            f"Distress zone: Altman Z = {z_txt} "
+            f"(below {thresholds.get('altman_z_min', 1.8)}). "
+            "Blocked from Buy regardless of composite/bargain scores."
+        )
     if analysis.get("is_good_buy"):
+        bump = (analysis.get("uncertainty") or {}).get("threshold_bump") or 0
+        hurdle = (
+            f" (hurdles +{bump:.0f} for {analysis.get('uncertainty', {}).get('label')} uncertainty)"
+            if bump
+            else ""
+        )
         st.success(
             f"Meets good-buy criteria (composite ≥ {thresholds['composite_min']}, "
-            f"bargain ≥ {thresholds.get('bargain_min', 50)}, consensus not Sell)"
+            f"bargain ≥ {thresholds.get('bargain_min', 50)}, "
+            f"no distress flag, consensus not Sell){hurdle}"
         )
 
     # Company header card
@@ -1994,6 +2108,11 @@ def _render_stock_sidebar_sections(config: dict) -> None:
     thresholds = get_thresholds(config)
     st.write(f"Composite ≥ {thresholds['composite_min']}")
     st.write(f"Bargain ≥ {thresholds.get('bargain_min', 50)}")
+    st.write(f"Altman Z ≥ {thresholds.get('altman_z_min', 1.8)} (ex-financials/RE/utilities)")
+    st.write(
+        f"High uncertainty adds +{thresholds.get('uncertainty_high_bump', 6):.0f} "
+        "to both hurdles"
+    )
     if thresholds.get("exclude_sell_consensus"):
         st.write("Excludes sell-consensus names")
     st.caption(
@@ -2002,7 +2121,7 @@ def _render_stock_sidebar_sections(config: dict) -> None:
     st.markdown("---")
     st.markdown("**Composite factor weights**")
     st.caption(
-        "Seven factor groups (evidence-based priors for buy-and-hold). "
+        "Nine factor groups (revisions and insider buying are live-only). "
         "Shown as a share of total; renormalized at runtime over groups with data."
     )
     factor_weights = get_factor_weights(config)

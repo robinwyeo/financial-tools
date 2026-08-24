@@ -4,14 +4,17 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.factors import FACTOR_SCORE_COLUMNS
+from core.factors import FACTOR_SCORE_COLUMNS, FACTOR_SUB_BUCKETS
 from core.scoring import (
     _composite_and_coverage,
     _evaluate_good_buy,
     _merge_ticker_row_with_universe,
     apply_universe_snapshot_scoring,
     compute_bargain_score,
+    compute_family_percentile,
     compute_fund_bargain_score,
+    is_distressed,
+    rank_percentile,
     score_ticker,
     score_universe_df,
 )
@@ -54,6 +57,10 @@ def _minimal_df() -> pd.DataFrame:
         "low_volatility": 8.0,
         "shareholder_yield": 0.03,
         "investment": -0.05,
+        "revision_agreement": 0.6,
+        "revision_magnitude": 0.02,
+        "earnings_surprise": 0.04,
+        "insider_buying": 0.001,
     }
     rows = []
     for i, ticker in enumerate(["AAA", "BBB", "CCC"]):
@@ -62,6 +69,51 @@ def _minimal_df() -> pd.DataFrame:
         row["momentum_12_1"] = base["momentum_12_1"] * (1 - i * 0.1)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def test_rank_percentile_is_empirical():
+    """Percentiles are (rank - 0.5) / n * 100 with average ranks for ties."""
+    pct = rank_percentile(pd.Series([1.0, 2.0, 3.0, 4.0]))
+    assert pct.tolist() == pytest.approx([12.5, 37.5, 62.5, 87.5])
+
+    # Extreme outliers cannot distort spacing — ranks are distribution-free.
+    pct_outlier = rank_percentile(pd.Series([1.0, 2.0, 3.0, 1e9]))
+    assert pct_outlier.tolist() == pytest.approx([12.5, 37.5, 62.5, 87.5])
+
+    constant = rank_percentile(pd.Series([5.0, 5.0, 5.0]))
+    assert constant.tolist() == pytest.approx([50.0, 50.0, 50.0])
+
+    too_few = rank_percentile(pd.Series([1.0, 2.0]))
+    assert too_few.isna().all()
+
+
+def test_compute_family_percentile_buckets_decorrelate():
+    """Bucketed signals contribute per-bucket, not per-column."""
+    n = 5
+    df = pd.DataFrame(
+        {
+            # Two perfectly correlated signals in one bucket...
+            "a": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "b": [10.0, 20.0, 30.0, 40.0, 50.0],
+            # ...and one anti-correlated signal in its own bucket.
+            "c": [5.0, 4.0, 3.0, 2.0, 1.0],
+        }
+    )
+    flat = compute_family_percentile(df, ["a", "b", "c"])
+    bucketed = compute_family_percentile(df, ["a", "b", "c"], buckets=[["a", "b"], ["c"]])
+
+    pct_a = rank_percentile(df["a"])
+    pct_c = rank_percentile(df["c"])
+    # Flat: (a + b + c) / 3 = (2*pct_a + pct_c) / 3; bucketed: (pct_a + pct_c) / 2 = 50.
+    assert flat.tolist() == pytest.approx(((2 * pct_a + pct_c) / 3).tolist())
+    assert bucketed.tolist() == pytest.approx([50.0] * n)
+
+
+def test_quality_group_uses_sub_buckets():
+    """A profitability juggernaut with poor accruals/strength lands mid-pack on quality."""
+    assert "quality" in FACTOR_SUB_BUCKETS
+    covered = {c for bucket in FACTOR_SUB_BUCKETS["quality"] for c in bucket}
+    assert covered == set(FACTOR_SCORE_COLUMNS["quality"])
 
 
 def test_composite_excludes_missing_factors():
@@ -381,6 +433,57 @@ def test_evaluate_good_buy_coverage_gate():
     assert _evaluate_good_buy(55, 20, analyst, thresholds, factor_coverage_pct=69.9, **common) is False
     # Rows without a coverage figure are not blocked (e.g. legacy snapshots).
     assert _evaluate_good_buy(55, 20, analyst, thresholds, factor_coverage_pct=None, **common) is True
+
+
+def test_evaluate_good_buy_altman_distress_gate():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "altman_z_min": 1.8,
+        "require_implied_upside": False,
+        "exclude_sell_consensus": True,
+    }
+    analyst = {"consensus_label": "Buy"}
+    common = dict(bargain_score=60)
+    # Healthy Z passes; distress-zone Z blocks regardless of scores.
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=3.0, **common) is True
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=1.5, **common) is False
+    # Missing Z never blocks (e.g. financials where Z is undefined).
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=None, **common) is True
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=float("nan"), **common) is True
+
+
+def test_is_distressed():
+    assert is_distressed(1.5) is True
+    assert is_distressed(1.8) is False
+    assert is_distressed(3.0) is False
+    assert is_distressed(None) is False
+    assert is_distressed(float("nan")) is False
+    # Configurable cutoff.
+    assert is_distressed(2.5, {"altman_z_min": 3.0}) is True
+    # Classic Z is invalid for financials / real estate / utilities — exempt.
+    assert is_distressed(0.8, None, "Financial Services") is False
+    assert is_distressed(0.8, None, "Real Estate") is False
+    assert is_distressed(0.8, None, "Utilities") is False
+    assert is_distressed(0.8, None, "Technology") is True
+
+
+def test_evaluate_good_buy_uncertainty_widens_hurdles():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "require_implied_upside": False,
+        "exclude_sell_consensus": True,
+    }
+    analyst = {"consensus_label": "Buy"}
+    # 52 composite clears 50 but not 50+6.
+    assert _evaluate_good_buy(52, 20, analyst, thresholds, bargain_score=60) is True
+    assert _evaluate_good_buy(
+        52, 20, analyst, thresholds, bargain_score=60, uncertainty_bump=6.0
+    ) is False
+    assert _evaluate_good_buy(
+        57, 20, analyst, thresholds, bargain_score=57, uncertainty_bump=6.0
+    ) is True
 
 
 def test_evaluate_good_buy_optional_upside_gate():

@@ -14,9 +14,12 @@ chase. Keep a broad low-cost index core.
 ## Features
 
 - **Streamlit dashboard** — enter a ticker for factor scorecard, analyst consensus, price targets, and implied upside
-- **Seven factor groups** — Value, GARP, Quality, Balance Sheet, Momentum (12-1), Low Volatility, Capital Discipline
-- **Cross-sectional scoring** — percentile ranks vs S&P 500 universe (sector-adjusted when enabled)
-- **Bargain score** — long-horizon cheapness (Graham margin of safety, valuation vs own history, 52-week discount)
+- **Nine factor groups** — Value, GARP, Quality, Balance Sheet, Momentum (12-1), Low Volatility, Capital Discipline, Estimate Revisions (Zacks-style), Insider Buying
+- **Cross-sectional scoring** — empirical percentile ranks vs S&P 500 universe (sector-adjusted when enabled). The quality group is scored in three de-correlated sub-buckets (profitability, earnings quality, financial strength) so five correlated profitability ratios cannot dominate the group
+- **Bargain score** — long-horizon cheapness (Graham margin of safety 55%, valuation vs own 10y EDGAR history 30%, 52-week discount 15%). History uses EBIT/EV, OCF yield, and book-to-market, scoring against the multiple that best tracked the stock's own price
+- **Distress gate** — Altman Z below 1.8 blocks a Buy outright, regardless of composite/bargain scores (financials, real estate, and utilities are exempt — the classic Z model is invalid for those balance sheets)
+- **Uncertainty badge** — Low/Medium/High from coverage, 12m volatility, and analyst target dispersion; High widens both Buy hurdles
+- **Short-interest flag** — Yahoo/FINRA days-to-cover and short % of float (overlay only, not a weighted factor)
 - **Fund view (ETFs & mutual funds, US + Canada)** — full dashboard with a fund composite score, factor scorecard, radar, and price history, scored against a peer universe of well-known US and Canadian funds
 - **Weekly email** — Monday watchlist scorecard (composite, bargain, upside, Buy/Not Buy)
 - **Monthly email** — full S&P 500 scorecard (1st of each month)
@@ -82,11 +85,17 @@ Edit [`config.yaml`](config.yaml):
 **Watchlist:** edit the [`watchlist`](watchlist) file at the repo root — one ticker per line (`#` for comments). This file is used by the weekly watchlist job.
 
 Default buy rule: `composite >= threshold` AND `bargain >= threshold` AND factor
-coverage ≥ 70% AND consensus is not Sell (see `config.yaml` for current values,
-which are written by `python -m backtest.run apply` from committed calibration
-artifacts in `backtest/results/`). Analyst implied upside is shown for context
+coverage ≥ 70% AND Altman Z ≥ 1.8 (no distress) AND consensus is not Sell (see
+`config.yaml` for current values, which are written by
+`python -m backtest.run apply` from committed calibration artifacts in
+`backtest/results/`). Analyst implied upside is shown for context
 but is not a hard gate. The coverage gate prevents stocks with sparse financial
 data from passing on a composite renormalized over only a few factor groups.
+The Altman gate treats distress non-linearly: a linear composite would only
+nudge a distress-zone stock down a few points, so it is excluded outright.
+Missing Z never blocks, and Financial Services / Real Estate / Utilities are
+exempt (the classic 1968 Z model was built for industrials and misclassifies
+those sectors' structural leverage as distress).
 
 ## Email alerts setup
 
@@ -206,9 +215,16 @@ prices, covering historical S&P 500 constituents from 2010 to 2026.
   `equal`) on gated DCA buy-and-hold performance with ~10 bps transaction costs
   and bootstrap confidence intervals — it does **not** search for overfit weights.
 - Evaluation uses **1y / 3y / 5y** forward excess returns (plus next-quarter IC).
-- Scoring matches live: sector-adjusted z-scores when sector data is available.
-- Bargain weights (Graham margin of safety, valuation vs own history, 52w discount)
-  are validated via long-horizon rank IC.
+- Scoring matches live: sector-adjusted empirical percentile ranks (the backtest
+  engine calls the same `compute_family_percentile` used by the dashboard).
+- Bargain weights (Graham margin of safety, valuation vs own 10y history, 52w discount)
+  are validated via long-horizon rank IC; the applied `graham_heavy` weights
+  (0.55/0.30/0.15) roughly doubled the 3y/5y bargain IC vs the old 0.40/0.35/0.25.
+  Live bargain history now uses the same EDGAR store as the backtest (EBIT/EV,
+  OCF yield, book-to-market; pick the series that tracked price, else average).
+- Estimate revisions and Form 4 insider buying are **live-only**. They are
+  excluded from the historical composite and the remaining groups are
+  renormalized — those signals have no reconstructed point-in-time panel here.
 - Good-buy thresholds are calibrated on **3-year** forward excess-return buckets.
 
 ### What the backtest actually shows
@@ -221,13 +237,15 @@ strategy results are survivorship-biased upward).
 The honest summary from the expanding-window folds (see
 `backtest/results/weight_candidate_comparison.json`):
 
-- 3-year rank IC of the composite is small (~0.05–0.07 across candidates).
+- 3-year rank IC of the composite is small (~0.07 across candidates; ~0.08 at
+  5y under the rank-percentile scoring).
 - Mean 3-year excess return of the gated DCA strategy vs SPY has a bootstrap
   CI that **includes zero** — no candidate is statistically distinguishable
   from the index or from the other candidates.
-- Bargain-score rank ICs are near zero at every horizon (~0.01), so the
-  bargain gate is best understood as an entry-discipline heuristic, not a
-  validated return predictor.
+- Bargain-score rank ICs improved with the `graham_heavy` weights (~0.016 at
+  3y, ~0.022 at 5y, up from ~0.008/0.012) but remain small, so the bargain
+  gate is best understood as an entry-discipline heuristic, not a validated
+  return predictor.
 
 Known limitations: ~175 delisted historical S&P 500 members (bankruptcies and
 acquisitions) have no free price history and can never be selected by the

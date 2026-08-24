@@ -2,20 +2,25 @@ universe:
   name: sp500
   sector_scoring: true
 thresholds:
-  composite_min: 57.5
-  bargain_min: 49.4
+  composite_min: 58.9
+  bargain_min: 49.5
   coverage_min_pct: 70
+  altman_z_min: 1.8
+  uncertainty_medium_bump: 3
+  uncertainty_high_bump: 6
   implied_upside_min_pct: 15
   require_implied_upside: false
   exclude_sell_consensus: true
 factor_weights:
   value: 0.25
-  garp: 0.1
-  quality: 0.25
+  garp: 0.05
+  quality: 0.225
   balance_sheet: 0.1
   momentum: 0.1
-  low_volatility: 0.075
-  capital_discipline: 0.125
+  low_volatility: 0.05
+  capital_discipline: 0.1
+  estimate_revisions: 0.1
+  insider: 0.025
 fund_factor_weights:
   cost: 0.35
   performance: 0.15
@@ -24,9 +29,9 @@ fund_factor_weights:
   momentum: 0.1
   income: 0.1
 bargain_weights:
-  margin_of_safety: 0.4
-  valuation_vs_history: 0.35
-  discount_52w: 0.25
+  margin_of_safety: 0.55
+  valuation_vs_history: 0.3
+  discount_52w: 0.15
 email:
   enabled: true
   smtp_host: smtp.gmail.com

@@ -1,4 +1,4 @@
-"""Cross-sectional scoring: winsorize, z-scores, percentiles, composite."""
+"""Cross-sectional scoring: empirical rank percentiles, group buckets, composite."""
 
 from __future__ import annotations
 
@@ -18,22 +18,27 @@ from core.config import (
 from core.data import (
     build_fund_raw_metrics,
     build_raw_metrics,
-    compute_valuation_vs_history,
     get_security_type,
     is_etf,
     is_fund,
 )
-from core.factors import FACTOR_SCORE_COLUMNS, compute_all_factors
+from core.edgar_history import compute_valuation_vs_history_detail
+from core.estimates import compute_revision_factors
+from core.insiders import compute_insider_factor
+from core.signals import compute_short_interest, compute_uncertainty
+from core.factors import FACTOR_SCORE_COLUMNS, FACTOR_SUB_BUCKETS, compute_all_factors
 from core.fund_factors import FUND_FACTOR_SCORE_COLUMNS, compute_fund_factors
 from core.fund_universe import load_fund_universe_snapshot
 from core.universe import load_universe_snapshot, snapshot_path
 from core.watchlist import load_watchlist
 
 # Long-horizon valuation bargain weights (RSI removed; kept as informational only).
+# graham_heavy candidate: roughly doubles 3y/5y rank IC vs the old 0.40/0.35/0.25
+# default in backtest/results/bargain_tuning_results.json (0.016/0.022 vs 0.008/0.012).
 BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
-    "margin_of_safety": 0.40,
-    "valuation_vs_history": 0.35,
-    "discount_52w": 0.25,
+    "margin_of_safety": 0.55,
+    "valuation_vs_history": 0.30,
+    "discount_52w": 0.15,
 }
 
 
@@ -62,7 +67,8 @@ def compute_bargain_score(
 
     Components:
       margin_of_safety       — Graham ratio scored over [0.30, 1.30].
-      valuation_vs_history   — current EBIT/EV percentile vs own 5y history (0-100).
+      valuation_vs_history   — cheapness vs own 10y EDGAR history (best of
+                               EBIT/EV, OCF yield, book-to-market).
       discount_52w           — % below 52-week high; linear 0%→0, 30%→100.
 
     RSI is intentionally excluded (short-horizon mean-reversion). Analyst upside
@@ -171,17 +177,27 @@ def _bargain_fields(
 ) -> dict[str, Any]:
     """Build bargain score and related fields for analysis dict."""
     del analyst  # upside is informational; not used in bargain score
+    valuation_detail: dict[str, Any] = {}
     valuation_vs_history = raw.get("valuation_vs_history")
     if valuation_vs_history is None:
         current_ey = raw.get("earnings_yield_current")
         if current_ey is None:
             current_ey = factors.get("earnings_yield")
+        ocf = raw.get("operating_cashflow")
+        mcap = raw.get("market_cap")
+        current_ocf_yield = None
+        if ocf is not None and mcap and mcap > 0:
+            current_ocf_yield = float(ocf) / float(mcap)
         ticker = raw.get("ticker")
         if ticker:
             try:
-                valuation_vs_history = compute_valuation_vs_history(
-                    str(ticker), current_ey
+                valuation_detail = compute_valuation_vs_history_detail(
+                    str(ticker),
+                    current_ey,
+                    current_ocf_yield=current_ocf_yield,
+                    current_book_to_market=factors.get("book_to_market"),
                 )
+                valuation_vs_history = valuation_detail.get("score")
             except Exception:
                 valuation_vs_history = None
     bargain = compute_bargain_score(
@@ -195,27 +211,24 @@ def _bargain_fields(
         "all_time_high": raw.get("all_time_high"),
         "rsi_14": raw.get("rsi_14"),  # informational timing indicator
         "valuation_vs_history": valuation_vs_history,
+        "valuation_history": valuation_detail,
         "bargain": bargain,
     }
 
 
-def winsorize(series: pd.Series, lower: float = 0.01, upper: float = 0.99) -> pd.Series:
-    if series.dropna().empty:
-        return series
-    lo = series.quantile(lower)
-    hi = series.quantile(upper)
-    return series.clip(lower=lo, upper=hi)
+def rank_percentile(series: pd.Series) -> pd.Series:
+    """
+    Empirical cross-sectional percentile (0-100) using average ranks.
 
-
-def cross_sectional_zscore(series: pd.Series) -> pd.Series:
-    s = series.dropna()
-    if len(s) < 3:
+    Rank-based, so robust to outliers without a distributional assumption
+    (replaces the previous winsorize -> z-score -> normal-CDF mapping).
+    Requires at least 3 non-null values; constant columns map to 50.
+    """
+    n = series.count()
+    if n < 3:
         return pd.Series(np.nan, index=series.index)
-    mean = s.mean()
-    std = s.std()
-    if std == 0 or np.isnan(std):
-        return pd.Series(0.0, index=series.index)
-    return (series - mean) / std
+    ranks = series.rank(method="average")
+    return (ranks - 0.5) / n * 100.0
 
 
 def _score_column(
@@ -224,36 +237,66 @@ def _score_column(
     group_col: str | None,
     min_group_size: int = 5,
 ) -> pd.Series:
-    """Z-score a column, using sector groups when large enough else universe-wide."""
+    """Empirical percentile of a column, within sector groups when large enough
+    else universe-wide."""
     if col not in df.columns:
         return pd.Series(np.nan, index=df.index)
 
-    winsorized = winsorize(df[col])
+    values = df[col]
 
     if group_col and group_col in df.columns:
-        def group_z(s: pd.Series) -> pd.Series:
+        def group_pct(s: pd.Series) -> pd.Series:
             if s.dropna().shape[0] >= min_group_size:
-                return cross_sectional_zscore(winsorize(s))
+                return rank_percentile(s)
             return pd.Series(np.nan, index=s.index)
 
-        z = winsorized.groupby(df[group_col]).transform(group_z)
+        pct = values.groupby(df[group_col]).transform(group_pct)
         # Fallback to universe-wide for small sectors
-        missing = z.isna() & winsorized.notna()
+        missing = pct.isna() & values.notna()
         if missing.any():
-            universe_z = cross_sectional_zscore(winsorized)
-            z = z.where(~missing, universe_z)
-        return z
+            universe_pct = rank_percentile(values)
+            pct = pct.where(~missing, universe_pct)
+        return pct
 
-    return cross_sectional_zscore(winsorized)
+    return rank_percentile(values)
 
 
-def zscore_to_percentile(z: float | None) -> float | None:
-    """Convert z-score to 0-100 percentile using normal CDF."""
-    if z is None or np.isnan(z):
-        return None
-    from core.analysts import norm_cdf
+def compute_family_percentile(
+    df: pd.DataFrame,
+    cols: list[str],
+    *,
+    group_col: str | None = None,
+    buckets: list[list[str]] | None = None,
+) -> pd.Series:
+    """
+    Group percentile score for one factor family.
 
-    return float(norm_cdf(z) * 100)
+    Each sub-signal is ranked cross-sectionally (sector-relative when
+    ``group_col`` is given), then averaged within buckets, then bucket scores
+    are averaged (skipna at both levels). Without explicit ``buckets`` every
+    sub-signal is its own bucket, which reduces to a plain mean of sub-signal
+    percentiles. Buckets stop correlated sub-signals (e.g. five profitability
+    ratios) from silently dominating a family score.
+    """
+    if buckets:
+        covered = {c for bucket in buckets for c in bucket}
+        bucket_defs = list(buckets) + [[c] for c in cols if c not in covered]
+    else:
+        bucket_defs = [[c] for c in cols]
+
+    bucket_scores: list[pd.Series] = []
+    for bucket in bucket_defs:
+        sub = [
+            _score_column(df, col, group_col)
+            for col in bucket
+            if col in df.columns
+        ]
+        if sub:
+            bucket_scores.append(pd.concat(sub, axis=1).mean(axis=1, skipna=True))
+
+    if not bucket_scores:
+        return pd.Series(np.nan, index=df.index)
+    return pd.concat(bucket_scores, axis=1).mean(axis=1, skipna=True)
 
 
 def _composite_and_coverage(
@@ -299,6 +342,10 @@ LIVE_FACTOR_OVERLAY_COLUMNS = frozenset({
     "volatility_12m",
     "max_drawdown",
     "downside_deviation",
+    "revision_agreement",
+    "revision_magnitude",
+    "earnings_surprise",
+    "insider_buying",
 })
 
 # Zero means "no signal" for these columns, not a measured value.
@@ -321,6 +368,41 @@ def _is_meaningful_value(val: Any, *, column: str | None = None) -> bool:
 
 def _should_overlay_live_value(key: str) -> bool:
     return key in METADATA_OVERLAY_COLUMNS or key in LIVE_FACTOR_OVERLAY_COLUMNS
+
+
+def _attach_live_signals(
+    analysis: dict[str, Any],
+    raw: dict[str, Any],
+    thresholds: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach revision sparkline, insider badge, short-interest flag, uncertainty."""
+    revisions = compute_revision_factors(raw)
+    insider = compute_insider_factor(raw)
+    short = compute_short_interest(raw, thresholds)
+    analyst = analysis.get("analyst") or {}
+    uncertainty = compute_uncertainty(
+        factor_coverage_pct=analysis.get("factor_coverage_pct"),
+        volatility_12m=raw.get("volatility_12m") or analysis.get("volatility_12m"),
+        target_high=raw.get("target_high", analyst.get("target_high")),
+        target_low=raw.get("target_low", analyst.get("target_low")),
+        target_mean=raw.get("target_mean", analyst.get("target_mean")),
+        thresholds=thresholds,
+    )
+    analysis["eps_trend_sparkline"] = revisions.get("eps_trend_sparkline") or []
+    analysis["revision_agreement"] = revisions.get("revision_agreement")
+    analysis["revision_magnitude"] = revisions.get("revision_magnitude")
+    analysis["earnings_surprise"] = revisions.get("earnings_surprise")
+    analysis["insider"] = {
+        "cluster_buy": bool(insider.get("insider_cluster_buy")),
+        "buyers_90d": insider.get("insider_buyers_90d") or 0,
+        "sellers_90d": insider.get("insider_sellers_90d") or 0,
+        "net_value_90d": insider.get("insider_net_value_90d"),
+        "buying_yield": insider.get("insider_buying"),
+    }
+    analysis["short_interest"] = short
+    analysis["uncertainty"] = uncertainty
+    analysis["volatility_12m"] = raw.get("volatility_12m")
+    return analysis
 
 
 def _merge_ticker_row_with_universe(row: dict, uni: pd.DataFrame, ticker: str) -> dict:
@@ -378,10 +460,11 @@ def score_universe_df(
     """
     Score all tickers in a factors dataframe cross-sectionally.
 
-    For each factor group: cross-sectionally rank each sub-signal (winsorize →
-    sector z-score → normal-CDF percentile), then average available sub-signal
-    percentiles into a single group percentile score. Composite = weighted average
-    of group scores over groups with data.
+    For each factor group: rank each sub-signal cross-sectionally (empirical
+    percentile, sector-relative when enabled), average within sub-buckets
+    (see FACTOR_SUB_BUCKETS), then average bucket scores into a single group
+    percentile. Composite = weighted average of group scores over groups with
+    data.
 
     ``factor_columns``/``weights`` default to the stock factor groups; pass the
     fund factor groups (and fund weights) to score a fund universe.
@@ -395,22 +478,12 @@ def score_universe_df(
     result = factors_df.copy()
 
     for family, cols in families.items():
-        pct_col = f"pct_{family}"
-        sub_series: list[pd.Series] = []
-
-        for col in cols:
-            if col not in result.columns:
-                continue
-            if use_sector:
-                z = _score_column(result, col, group_col)
-            else:
-                z = cross_sectional_zscore(winsorize(result[col]))
-            sub_series.append(z.apply(zscore_to_percentile))
-
-        if sub_series:
-            result[pct_col] = pd.concat(sub_series, axis=1).mean(axis=1, skipna=True)
-        else:
-            result[pct_col] = np.nan
+        result[f"pct_{family}"] = compute_family_percentile(
+            result,
+            cols,
+            group_col=group_col if use_sector else None,
+            buckets=FACTOR_SUB_BUCKETS.get(family),
+        )
 
     composites = []
     coverages = []
@@ -478,14 +551,8 @@ def score_ticker(
     implied_upside = analyst.get("implied_upside_pct")
     bargain_data = _bargain_fields(raw, factors, analyst, cfg)
     bargain_score = (bargain_data.get("bargain") or {}).get("score")
-    is_good_buy = _evaluate_good_buy(
-        composite,
-        implied_upside,
-        analyst,
-        thresholds,
-        bargain_score=bargain_score,
-        factor_coverage_pct=factor_coverage_pct,
-    )
+    altman_z = row.get("altman_z")
+    sector = _resolved_display_field(raw, row, "sector", ticker=ticker)
 
     factor_breakdown: dict[str, dict] = {}
     for family in FACTOR_SCORE_COLUMNS:
@@ -498,10 +565,10 @@ def score_ticker(
     factors_raw = {col: row.get(col) for col in all_sub_cols}
     factors_raw["trailing_pe"] = raw.get("trailing_pe")
 
-    return {
+    analysis = {
         "ticker": ticker,
         "name": _resolved_display_field(raw, row, "name", ticker=ticker),
-        "sector": _resolved_display_field(raw, row, "sector", ticker=ticker),
+        "sector": sector,
         "industry": _resolved_display_field(raw, row, "industry", ticker=ticker),
         "exchange": raw.get("exchange"),
         "price": raw.get("price"),
@@ -515,11 +582,26 @@ def score_ticker(
         "factor_breakdown": factor_breakdown,
         "factors_raw": factors_raw,
         "analyst": analyst,
-        "is_good_buy": is_good_buy,
+        "altman_z": altman_z,
+        "distress_flag": is_distressed(altman_z, thresholds, sector),
         "data_warnings": raw.get("data_warnings", []),
         "scored_row": scored_row,
         **bargain_data,
     }
+    analysis = _attach_live_signals(analysis, raw, thresholds)
+    bump = (analysis.get("uncertainty") or {}).get("threshold_bump") or 0.0
+    analysis["is_good_buy"] = _evaluate_good_buy(
+        composite,
+        implied_upside,
+        analyst,
+        thresholds,
+        bargain_score=bargain_score,
+        factor_coverage_pct=factor_coverage_pct,
+        altman_z=altman_z,
+        sector=sector,
+        uncertainty_bump=bump,
+    )
+    return analysis
 
 
 def score_universe(config: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -726,13 +808,32 @@ def apply_universe_snapshot_scoring(
 
     analyst = updated.get("analyst") or {}
     bargain_score = (updated.get("bargain") or {}).get("score")
+    thresholds = get_thresholds(cfg)
+    altman_z = snap_row.get("altman_z", updated.get("altman_z"))
+    if isinstance(altman_z, float) and np.isnan(altman_z):
+        altman_z = updated.get("altman_z")
+    sector = updated.get("sector") or snap_row.get("sector")
+    updated["altman_z"] = altman_z
+    updated["distress_flag"] = is_distressed(altman_z, thresholds, sector)
+    uncertainty = compute_uncertainty(
+        factor_coverage_pct=updated.get("factor_coverage_pct"),
+        volatility_12m=updated.get("volatility_12m"),
+        target_high=analyst.get("target_high"),
+        target_low=analyst.get("target_low"),
+        target_mean=analyst.get("target_mean"),
+        thresholds=thresholds,
+    )
+    updated["uncertainty"] = uncertainty
     updated["is_good_buy"] = _evaluate_good_buy(
         updated["composite"],
         analyst.get("implied_upside_pct"),
         analyst,
-        get_thresholds(cfg),
+        thresholds,
         bargain_score=bargain_score,
         factor_coverage_pct=updated.get("factor_coverage_pct"),
+        altman_z=altman_z,
+        sector=sector,
+        uncertainty_bump=uncertainty.get("threshold_bump") or 0.0,
     )
     return updated
 
@@ -750,7 +851,7 @@ def _score_without_universe(
         for family in FACTOR_SCORE_COLUMNS
     }
     all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
-    return {
+    analysis = {
         "ticker": ticker,
         "name": raw.get("name"),
         "sector": raw.get("sector"),
@@ -768,10 +869,48 @@ def _score_without_universe(
         "factors_raw": {**{col: factors.get(col) for col in all_sub_cols}, "trailing_pe": raw.get("trailing_pe")},
         "analyst": analyst,
         "is_good_buy": False,
+        "altman_z": factors.get("altman_z"),
+        "distress_flag": is_distressed(
+            factors.get("altman_z"), get_thresholds(cfg), raw.get("sector")
+        ),
         "data_warnings": raw.get("data_warnings", []),
         "warning": "Universe snapshot missing. Run jobs/watchlist_weekly.py or core/universe.py to build it.",
         **_bargain_fields(raw, factors, analyst, cfg),
     }
+    return _attach_live_signals(analysis, raw, get_thresholds(cfg))
+
+
+# Altman Z (1968) was built for industrial firms. Financials carry huge
+# balance sheets with low asset turnover, and regulated utilities / REITs run
+# structurally high leverage, so the classic cutoffs misclassify healthy names
+# (e.g. Aflac, utilities) as distressed. Altman himself excluded financials.
+ALTMAN_EXEMPT_SECTORS: frozenset[str] = frozenset({
+    "Financial Services",
+    "Real Estate",
+    "Utilities",
+})
+
+
+def is_distressed(
+    altman_z: float | None,
+    thresholds: dict | None = None,
+    sector: str | None = None,
+) -> bool:
+    """
+    Hard distress disqualifier: Altman Z below the distress-zone cutoff (1.8).
+
+    A distress signal is treated non-linearly (a hard gate) rather than as a
+    small linear drag on the balance-sheet group, mirroring how Morningstar
+    and GuruFocus handle distress metrics. Missing Z never blocks, and sectors
+    where the classic Z model is invalid (financials, real estate, utilities)
+    are exempt.
+    """
+    if sector is not None and str(sector) in ALTMAN_EXEMPT_SECTORS:
+        return False
+    if altman_z is None or (isinstance(altman_z, float) and np.isnan(altman_z)):
+        return False
+    z_min = float((thresholds or {}).get("altman_z_min", 1.8))
+    return float(altman_z) < z_min
 
 
 def _evaluate_good_buy(
@@ -782,9 +921,12 @@ def _evaluate_good_buy(
     *,
     bargain_score: float | None = None,
     factor_coverage_pct: float | None = None,
+    altman_z: float | None = None,
+    sector: str | None = None,
+    uncertainty_bump: float | None = None,
 ) -> bool:
     """
-    Good-buy gate: composite + bargain + factor coverage
+    Good-buy gate: composite + bargain + factor coverage + no distress
     (+ optional sell-consensus filter).
 
     The coverage gate stops thin data from producing confident scores: with
@@ -792,11 +934,20 @@ def _evaluate_good_buy(
     a stock scored on 2 of 7 groups would otherwise look as trustworthy as one
     scored on all 7. Rows without a coverage figure (None) are not blocked.
 
+    The Altman-Z distress gate blocks names in the distress zone (Z < 1.8)
+    outright — a linear composite would only nudge them down a few points.
+    Sectors where the classic Z model is invalid (financials, real estate,
+    utilities) are exempt.
+
+    High uncertainty widens the composite/bargain cutoffs (Morningstar-style
+    larger required discount when the estimate is noisier).
+
     Analyst implied upside is informational by default. Set
     ``require_implied_upside: true`` in config to restore the hard gate.
     """
-    composite_min = float(thresholds.get("composite_min", 50))
-    bargain_min = float(thresholds.get("bargain_min", 50))
+    bump = float(uncertainty_bump or 0.0)
+    composite_min = float(thresholds.get("composite_min", 50)) + bump
+    bargain_min = float(thresholds.get("bargain_min", 50)) + bump
     coverage_min = float(thresholds.get("coverage_min_pct", 70))
     exclude_sell = bool(thresholds.get("exclude_sell_consensus", True))
     require_upside = bool(thresholds.get("require_implied_upside", False))
@@ -807,6 +958,8 @@ def _evaluate_good_buy(
     if bargain_score is None or bargain_score < bargain_min:
         return False
     if factor_coverage_pct is not None and factor_coverage_pct < coverage_min:
+        return False
+    if is_distressed(altman_z, thresholds, sector):
         return False
     if require_upside and (implied_upside is None or implied_upside < upside_min):
         return False

@@ -1,6 +1,6 @@
 # Score Weight & Threshold Backtest Report
 
-Generated: 2026-07-26 20:45 UTC
+Generated: 2026-08-24 15:38 UTC
 
 ## Summary
 
@@ -22,9 +22,9 @@ Primary horizon: **3y**
 
 | Candidate | 3y IC | Excess mean | 95% CI | % folds > 0 |
 | --- | ---: | ---: | ---: | ---: |
-| evidence_based | 0.060 | 1.87% | [-2.62%, 6.48%] | 50% |
-| equal | 0.070 | 0.81% | [-4.70%, 5.52%] | 67% |
-| legacy_tuned | 0.065 | -0.93% | [-8.35%, 5.25%] | 50% |
+| evidence_based | 0.064 | 1.86% | [-2.58%, 6.99%] | 33% |
+| equal | 0.080 | 0.01% | [-3.91%, 4.69%] | 50% |
+| legacy_tuned | 0.070 | -0.17% | [-5.55%, 5.35%] | 50% |
 
 - **evidence_based** vs **equal**: indistinguishable (bootstrap CIs overlap).
 - **evidence_based** vs **legacy_tuned**: indistinguishable (bootstrap CIs overlap).
@@ -33,33 +33,33 @@ Primary horizon: **3y**
 
 ```yaml
   balance_sheet: 0.1000
-  capital_discipline: 0.1250
-  garp: 0.1000
-  low_volatility: 0.0750
+  capital_discipline: 0.1000
+  garp: 0.0500
+  low_volatility: 0.0500
   momentum: 0.1000
-  quality: 0.2500
+  quality: 0.2250
   value: 0.2500
 ```
 
 ## Bargain Weight Validation
 
 - Winner: **default_long_horizon**
-- Winner mean IC (3y): 0.008
-- Baseline mean IC: 0.008
+- Winner mean IC (3y): 0.015
+- Baseline mean IC: 0.015
 
 ### Recommended bargain weights
 
 ```yaml
-  discount_52w: 0.2500
-  margin_of_safety: 0.4000
-  valuation_vs_history: 0.3500
+  discount_52w: 0.1500
+  margin_of_safety: 0.5500
+  valuation_vs_history: 0.3000
 ```
 
 ## Threshold Calibration
 
 - Horizon: **3y**
-- composite_min: **57.5**
-- bargain_min: **49.4**
+- composite_min: **58.9**
+- bargain_min: **49.5**
 
 ## Investment Comparison vs S&P 500
 
@@ -73,30 +73,30 @@ Each quarter, **$20,000** was invested into the top 5 good-buy stocks (old or ne
 
 | Metric | Old params | New params | S&P 500 (SPY) |
 | --- | ---: | ---: | ---: |
-| Terminal wealth | $7,559,854 | $6,727,997 | $4,326,313 |
+| Terminal wealth | $6,317,571 | $9,297,724 | $4,326,313 |
 | Total invested | $1,300,000 | $1,300,000 | $1,300,000 |
-| Total return | 481.5% | 417.5% | 232.8% |
-| CAGR | 11.6% | 10.8% | 7.8% |
-| Max drawdown | -25.7% | -22.5% | -21.9% |
+| Total return | 386.0% | 615.2% | 232.8% |
+| CAGR | 10.4% | 13.1% | 7.8% |
+| Max drawdown | -23.4% | -26.1% | -21.9% |
 
 ### Outperformance vs S&P 500
 
 | Comparison | Terminal wealth Δ | Return Δ | CAGR Δ | Higher ROI? |
 | --- | ---: | ---: | ---: | :---: |
-| Old params vs SPY | +$3,233,541 (+74.7%) | +248.7% | +3.8% | Yes |
-| New params vs SPY | +$2,401,684 (+55.5%) | +184.7% | +3.0% | Yes |
-| New params vs Old params | −$831,856 (−11.0%) | −64.0% | −0.8% | No |
+| Old params vs SPY | +$1,991,258 (+46.0%) | +153.2% | +2.6% | Yes |
+| New params vs SPY | +$4,971,411 (+114.9%) | +382.4% | +5.3% | Yes |
+| New params vs Old params | +$2,980,153 (+47.2%) | +229.2% | +2.7% | Yes |
 
 ### Interpretation
 
-- **Old parameters** finished +$3,233,541 ahead of SPY in terminal wealth; return on deployed capital was 481.5% (11.6% CAGR) vs SPY's 232.8% (7.8% CAGR).
-- **New parameters** finished +$2,401,684 ahead of SPY in terminal wealth; return on deployed capital was 417.5% (10.8% CAGR) vs SPY's 232.8% (7.8% CAGR).
-- **Old parameters** beat new parameters by +$831,856 terminal wealth and +64.0% higher return on deployed capital.
+- **Old parameters** finished +$1,991,258 ahead of SPY in terminal wealth; return on deployed capital was 386.0% (10.4% CAGR) vs SPY's 232.8% (7.8% CAGR).
+- **New parameters** finished +$4,971,411 ahead of SPY in terminal wealth; return on deployed capital was 615.2% (13.1% CAGR) vs SPY's 232.8% (7.8% CAGR).
+- **New parameters** beat old parameters by +$2,980,153 terminal wealth and +229.2% higher return on deployed capital.
 
 ### Survivorship sensitivity (terminal wealth vs SPY)
 
 | Delist assumption | Old | New | SPY | Old − SPY | New − SPY |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 0% | $7,559,854 | $6,727,997 | $4,326,313 | +$3,233,541 | +$2,401,684 |
-| -50% | $7,559,854 | $6,727,997 | $4,326,313 | +$3,233,541 | +$2,401,684 |
-| -100% | $7,559,854 | $6,727,997 | $4,326,313 | +$3,233,541 | +$2,401,684 |
+| 0% | $6,317,571 | $9,297,724 | $4,326,313 | +$1,991,258 | +$4,971,411 |
+| -50% | $6,317,571 | $9,297,724 | $4,326,313 | +$1,991,258 | +$4,971,411 |
+| -100% | $6,317,571 | $9,297,724 | $4,326,313 | +$1,991,258 | +$4,971,411 |

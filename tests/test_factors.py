@@ -50,9 +50,14 @@ def test_shareholder_yield_ignores_acquisition_cashflow():
     assert result["net_buybacks"] is None
 
 
-def test_earnings_revisions_factor_removed():
-    """The unvalidated recommendation-scraping pseudo-factor is gone entirely."""
-    assert "earnings_revisions" not in FACTOR_SCORE_COLUMNS
+def test_estimate_revisions_group_is_zacks_style():
+    """Live revision factor uses estimate-table sub-signals, not keyword scraping."""
+    assert "estimate_revisions" in FACTOR_SCORE_COLUMNS
+    assert FACTOR_SCORE_COLUMNS["estimate_revisions"] == [
+        "revision_agreement",
+        "revision_magnitude",
+        "earnings_surprise",
+    ]
     all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
     assert "earnings_revisions" not in all_sub_cols
 

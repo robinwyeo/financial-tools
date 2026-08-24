@@ -448,6 +448,9 @@ def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
 
 def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     """Compute all raw factor values for a ticker."""
+    from core.estimates import compute_revision_factors
+    from core.insiders import compute_insider_factor
+
     out: dict[str, float | None] = {}
     out.update(compute_value_factors(raw))
     out.update(compute_momentum_factor(raw))
@@ -463,6 +466,12 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     out.update(compute_shareholder_yield(raw))
     out.update(compute_capital_efficiency(raw))
     out.update(compute_altman_z(raw))
+    revisions = compute_revision_factors(raw)
+    out["revision_agreement"] = revisions.get("revision_agreement")
+    out["revision_magnitude"] = revisions.get("revision_magnitude")
+    out["earnings_surprise"] = revisions.get("earnings_surprise")
+    insider = compute_insider_factor(raw)
+    out["insider_buying"] = insider.get("insider_buying")
     return out
 
 
@@ -485,4 +494,24 @@ FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
     "momentum": ["momentum_12_1"],
     "low_volatility": ["low_volatility"],
     "capital_discipline": ["shareholder_yield", "investment"],
+    "estimate_revisions": [
+        "revision_agreement",
+        "revision_magnitude",
+        "earnings_surprise",
+    ],
+    "insider": ["insider_buying"],
+}
+
+# Sub-buckets de-correlate a factor group before averaging: sub-signal
+# percentiles are averaged within each bucket, then bucket scores are averaged.
+# Without this, the five highly correlated profitability ratios in the quality
+# group carried 5/7 of the group score, silently drowning out earnings quality
+# (accruals) and financial strength (Piotroski). With buckets each theme
+# contributes 1/3. Groups not listed here average their sub-signals equally.
+FACTOR_SUB_BUCKETS: dict[str, list[list[str]]] = {
+    "quality": [
+        ["gross_profitability", "roe", "roa", "profit_margin", "roic"],
+        ["earnings_quality"],
+        ["financial_strength"],
+    ],
 }

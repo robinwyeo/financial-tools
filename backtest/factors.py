@@ -175,7 +175,7 @@ def compute_historical_bargain(
 
 
 def _attach_valuation_vs_history(panel: pd.DataFrame) -> pd.DataFrame:
-    """Point-in-time EY percentile vs each ticker's trailing 5y history."""
+    """Point-in-time EY percentile vs each ticker's trailing 10y history."""
     if panel.empty or "earnings_yield" not in panel.columns:
         panel = panel.copy()
         panel["valuation_vs_history"] = np.nan
@@ -348,6 +348,36 @@ def build_factor_panel(
     return panel
 
 
+def _reblend_bargain_score(panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recompute the blended bargain_score from stored component columns using the
+    current default weights (vectorized).
+
+    The stored bargain_score was blended with whatever weights were active when
+    the panel was built; components are weight-independent, so re-blending on
+    load keeps calibration/simulation consistent with the live configuration.
+    """
+    from core.scoring import BARGAIN_COMPONENT_WEIGHTS
+
+    comp_cols = {key: f"bargain_{key}" for key in BARGAIN_BACKTEST_COMPONENTS}
+    if not all(col in panel.columns for col in comp_cols.values()):
+        return panel
+
+    out = panel.copy()
+    weighted_sum = pd.Series(0.0, index=out.index)
+    weight_available = pd.Series(0.0, index=out.index)
+    for key, col in comp_cols.items():
+        w = float(BARGAIN_COMPONENT_WEIGHTS.get(key, 0.0))
+        vals = pd.to_numeric(out[col], errors="coerce")
+        available = vals.notna()
+        weighted_sum += vals.fillna(0.0) * w * available
+        weight_available += w * available
+    out["bargain_score"] = np.where(
+        weight_available > 0, weighted_sum / weight_available, np.nan
+    )
+    return out
+
+
 def load_factor_panel(*, enrich: bool = True) -> pd.DataFrame:
     """Load factor panel; enrich with valuation-vs-history bargain if needed."""
     if not FACTOR_PANEL_PATH.exists():
@@ -364,4 +394,4 @@ def load_factor_panel(*, enrich: bool = True) -> pd.DataFrame:
         logger.info("Enriching factor panel with long-horizon bargain components")
         panel = enrich_factor_panel(panel)
         panel.to_parquet(FACTOR_PANEL_PATH, index=False)
-    return panel
+    return _reblend_bargain_score(panel)

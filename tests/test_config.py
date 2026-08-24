@@ -32,14 +32,16 @@ def test_get_bargain_weights_no_removed_components():
     assert "rsi_oversold" not in weights
 
 
-def test_get_factor_weights_seven_groups():
+def test_get_factor_weights_includes_live_signal_groups():
     weights = get_factor_weights(load_config())
     expected_groups = {
         "value", "garp", "quality", "balance_sheet",
         "momentum", "low_volatility", "capital_discipline",
+        "estimate_revisions", "insider",
     }
     assert set(weights.keys()) == expected_groups
-    assert "earnings_revisions" not in weights
+    assert weights["estimate_revisions"] > 0
+    assert weights["insider"] > 0
 
 
 def test_get_factor_weights_match_factor_score_columns():

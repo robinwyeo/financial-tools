@@ -927,6 +927,7 @@ def render_company_header(analysis: dict) -> None:
         else ""
     )
 
+    badge_spans = "".join(_overlay_badge_spans(analysis))
     left, right = st.columns([3, 2])
     with left:
         # Single-level markup: Streamlit strips nested <div>s and can leak closing tags as text.
@@ -935,7 +936,8 @@ def render_company_header(analysis: dict) -> None:
             f'<span style="font-size:1.55rem;font-weight:800;color:#1e3a5f;">{ticker_e}</span>'
             f"{price_html}<br>"
             f'<span style="font-size:0.82rem;color:#6b7280;">{name_e}</span>'
-            f"{exchange_html}"
+            f"{exchange_html}<br>"
+            f"{badge_spans}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -1075,10 +1077,44 @@ def _signal_badge(label: str, tone: str) -> str:
     }
     fg, bg = colors.get(tone, colors["neutral"])
     return (
-        f'<span style="display:inline-block;margin:0 6px 6px 0;padding:2px 8px;'
+        f'<span style="display:inline-block;margin:0 6px 4px 0;padding:2px 8px;'
         f'border-radius:999px;font-size:0.72rem;font-weight:700;'
         f'color:{fg};background:{bg};">{html.escape(label)}</span>'
     )
+
+
+def _overlay_badge_spans(analysis: dict) -> list[str]:
+    """Pills for uncertainty / insider / short interest / valuation history.
+
+    Always include Uncertainty (default Low). Streamlit strips nested <div>s, so
+    callers must place these spans in a single top-level markup block.
+    """
+    uncertainty = analysis.get("uncertainty") or {}
+    unc_label = uncertainty.get("label") or "Low"
+    unc_tone = {"Low": "success", "Medium": "warning", "High": "danger"}.get(unc_label, "neutral")
+    bump = uncertainty.get("threshold_bump") or 0
+    bump_txt = f" · +{bump:.0f} buy hurdle" if bump else ""
+    badges = [_signal_badge(f"Uncertainty: {unc_label}{bump_txt}", unc_tone)]
+
+    insider = analysis.get("insider") or {}
+    if insider.get("cluster_buy"):
+        n_buyers = insider.get("buyers_90d") or 0
+        badges.append(_signal_badge(f"Insider cluster buy ({n_buyers} officers, 90d)", "success"))
+    short = analysis.get("short_interest") or {}
+    if short.get("high_short_interest"):
+        days = short.get("short_ratio")
+        days_txt = f"{days:.1f}d to cover" if days is not None else "elevated"
+        badges.append(_signal_badge(f"High short interest · {days_txt}", "warning"))
+    hist = analysis.get("valuation_history") or {}
+    if hist.get("source") and hist.get("n_points"):
+        metric = hist.get("metric") or "yield"
+        badges.append(
+            _signal_badge(
+                f"History: {hist.get('n_points')} pts · {metric} · {hist.get('source')}",
+                "info",
+            )
+        )
+    return badges
 
 
 def render_composite_card(
@@ -1129,45 +1165,14 @@ def render_composite_card(
         else ""
     )
 
-    uncertainty = analysis.get("uncertainty") or {}
-    unc_label = uncertainty.get("label")
-    unc_tone = {"Low": "success", "Medium": "warning", "High": "danger"}.get(unc_label, "neutral")
-    badges = []
-    if unc_label:
-        bump = uncertainty.get("threshold_bump") or 0
-        bump_txt = f" · +{bump:.0f} buy hurdle" if bump else ""
-        badges.append(_signal_badge(f"Uncertainty: {unc_label}{bump_txt}", unc_tone))
-    insider = analysis.get("insider") or {}
-    if insider.get("cluster_buy"):
-        n_buyers = insider.get("buyers_90d") or 0
-        badges.append(_signal_badge(f"Insider cluster buy ({n_buyers} officers, 90d)", "success"))
-    short = analysis.get("short_interest") or {}
-    if short.get("high_short_interest"):
-        days = short.get("short_ratio")
-        days_txt = f"{days:.1f}d to cover" if days is not None else "elevated"
-        badges.append(_signal_badge(f"High short interest · {days_txt}", "warning"))
-    hist = analysis.get("valuation_history") or {}
-    if hist.get("source") and hist.get("n_points"):
-        metric = hist.get("metric") or "yield"
-        badges.append(
-            _signal_badge(
-                f"History: {hist.get('n_points')} pts · {metric} · {hist.get('source')}",
-                "info",
-            )
-        )
-    badge_html = (
-        f'<div style="text-align:center;margin-top:0.45rem;">{"".join(badges)}</div>'
-        if badges
-        else ""
-    )
-
     spark = analysis.get("eps_trend_sparkline") or []
     spark_html = ""
     if len(spark) >= 2:
+        # Own markdown block — nested <div>s inside the gauge markup are stripped.
         spark_html = (
-            '<div style="text-align:center;margin-top:0.35rem;">'
-            '<div style="font-size:0.68rem;color:#6b7280;letter-spacing:0.04em;'
-            'text-transform:uppercase;">FY1 consensus EPS (90d → now)</div>'
+            '<div style="text-align:center;margin-top:0.2rem;">'
+            '<span style="display:block;font-size:0.68rem;color:#6b7280;letter-spacing:0.04em;'
+            'text-transform:uppercase;">FY1 consensus EPS (90d → now)</span>'
             + _sparkline_svg([float(v) for v in spark])
             + "</div>"
         )
@@ -1184,12 +1189,11 @@ def render_composite_card(
             '<div class="gauge-title">Bargain Score</div>'
             + bargain_gauge
             + rsi_note
-            + "</div></div>"
-            + badge_html
-            + spark_html
-            + "</div>",
+            + "</div></div></div>",
             unsafe_allow_html=True,
         )
+        if spark_html:
+            st.markdown(spark_html, unsafe_allow_html=True)
 
 
 def _factor_label_html(

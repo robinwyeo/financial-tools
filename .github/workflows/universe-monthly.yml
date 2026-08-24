@@ -5,6 +5,11 @@ on:
     # 1st of each month, 14:00 UTC ≈ 7:00 AM Pacific
     - cron: "0 14 1 * *"
   workflow_dispatch:
+    inputs:
+      skip_refresh:
+        description: "Score and email the committed snapshot without rebuilding"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -49,7 +54,12 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        run: python jobs/universe_monthly.py
+        run: |
+          extra=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_refresh }}" = "true" ]; then
+            extra="--no-refresh"
+          fi
+          python jobs/universe_monthly.py $extra
 
       - name: Commit updated snapshot
         run: |

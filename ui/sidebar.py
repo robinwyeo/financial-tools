@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
+
+import pandas as pd
 import streamlit as st
 
 from core.config import (
@@ -18,6 +21,8 @@ from ui.constants import BARGAIN_LABELS, FACTOR_LABELS, FUND_FACTOR_LABELS
 from ui.state import load_fund_universe_snapshot, load_universe_snapshot
 
 _MOS_ORDER = ("Low", "Medium", "High")
+_TICKER_KEY = "ticker"
+_DEFAULT_TICKER = "AAPL"
 
 
 def _mos_sidebar_text(mos: dict) -> str:
@@ -163,17 +168,59 @@ def _render_fund_sidebar_sections(config: dict) -> None:
         st.caption(f"Fund universe: {len(snapshot)} funds (snapshot: {date})")
 
 
+def normalize_ticker(raw: object | None) -> str:
+    """Uppercase ticker; accept a query-param list or scalar."""
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else ""
+    return str(raw or "").upper().strip()
+
+
+def _ticker_in_snapshot(snapshot: pd.DataFrame | None, ticker: str) -> bool:
+    if snapshot is None or snapshot.empty or "ticker" not in snapshot.columns:
+        return False
+    return ticker in set(snapshot["ticker"].astype(str).str.upper())
+
+
+def is_fund_ticker(ticker: str) -> bool:
+    """Route stock vs fund without a Yahoo round-trip for snapshot members."""
+    ticker = normalize_ticker(ticker)
+    if not ticker:
+        return False
+    if _ticker_in_snapshot(load_fund_universe_snapshot(), ticker):
+        return True
+    if _ticker_in_snapshot(load_universe_snapshot(), ticker):
+        return False
+    return get_security_type(ticker) in FUND_QUOTE_TYPES
+
+
+def _on_ticker_change() -> None:
+    st.session_state[_TICKER_KEY] = normalize_ticker(st.session_state.get(_TICKER_KEY))
+
+
+def render_ticker_input() -> str:
+    """Ticker box with a stable key. Do not pass query params as value= each rerun."""
+    kwargs: dict = {
+        "label": "Ticker",
+        "value": _DEFAULT_TICKER,
+        "key": _TICKER_KEY,
+        "help": (
+            "Stocks, ETFs, and mutual funds (US and Canadian; use .TO for TSX listings). "
+            "Press Enter or click Load to apply."
+        ),
+        "on_change": _on_ticker_change,
+    }
+    if "bind" in inspect.signature(st.text_input).parameters:
+        kwargs["bind"] = "query-params"
+    ticker = normalize_ticker(st.text_input(**kwargs))
+    st.button("Load ticker", use_container_width=True)
+    return ticker
+
+
 def render_sidebar(config: dict) -> str:
     st.header("Settings")
-    default_ticker = st.query_params.get("ticker", "AAPL")
-    ticker = st.text_input(
-        "Ticker",
-        value=default_ticker,
-        help="Stocks, ETFs, and mutual funds (US and Canadian; use .TO for TSX listings).",
-    ).upper().strip()
-    viewing_fund = bool(ticker) and get_security_type(ticker) in FUND_QUOTE_TYPES
+    ticker = render_ticker_input()
     st.markdown("---")
-    if viewing_fund:
+    if is_fund_ticker(ticker):
         _render_fund_sidebar_sections(config)
     else:
         _render_stock_sidebar_sections(config)

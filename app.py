@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.data import FUND_QUOTE_TYPES, get_security_type
 from ui.fund_view import render_fund_view
 from ui.layout import inject_css
 from ui.rankings import render_fund_universe_rankings, render_universe_rankings
-from ui.sidebar import render_sidebar
+from ui.sidebar import is_fund_ticker, render_sidebar
 from ui.state import (
     load_config,
     load_fund_universe_snapshot,
@@ -30,7 +29,7 @@ def main() -> None:
     config = load_config()
     with st.sidebar:
         ticker = render_sidebar(config)
-        viewing_fund = bool(ticker) and get_security_type(ticker) in FUND_QUOTE_TYPES
+        viewing_fund = is_fund_ticker(ticker)
 
     if viewing_fund:
         fund_snapshot = load_fund_universe_snapshot()

@@ -41,6 +41,73 @@ def test_card_shell_is_usable_as_context_manager(monkeypatch):
         pass
 
 
+def test_normalize_ticker_accepts_query_param_shapes():
+    from ui.sidebar import normalize_ticker
+
+    assert normalize_ticker("nvda") == "NVDA"
+    assert normalize_ticker(["msft"]) == "MSFT"
+    assert normalize_ticker("  aapl  ") == "AAPL"
+    assert normalize_ticker(None) == ""
+    assert normalize_ticker([]) == ""
+
+
+def test_is_fund_ticker_uses_snapshots_not_yahoo(monkeypatch):
+    from ui import sidebar
+
+    calls = {"n": 0}
+
+    def boom(_ticker):
+        calls["n"] += 1
+        return "EQUITY"
+
+    monkeypatch.setattr(
+        sidebar,
+        "load_universe_snapshot",
+        lambda: pd.DataFrame({"ticker": ["AAPL", "NVDA"]}),
+    )
+    monkeypatch.setattr(
+        sidebar,
+        "load_fund_universe_snapshot",
+        lambda: pd.DataFrame({"ticker": ["VTI", "VFV.TO"]}),
+    )
+    monkeypatch.setattr(sidebar, "get_security_type", boom)
+
+    assert sidebar.is_fund_ticker("nvda") is False
+    assert sidebar.is_fund_ticker("VTI") is True
+    assert calls["n"] == 0
+    sidebar.is_fund_ticker("XYZ")
+    assert calls["n"] == 1
+
+
+def _ticker_sidebar_app():
+    from ui.sidebar import render_sidebar
+    import streamlit as st
+
+    ticker = render_sidebar({"decision": {"mode": "intrinsic"}, "thresholds": {}})
+    st.write(f"ACTIVE:{ticker}")
+
+
+def test_sidebar_ticker_input_can_change_from_default(monkeypatch):
+    testing = pytest.importorskip("streamlit.testing.v1")
+    AppTest = testing.AppTest
+    from ui import sidebar
+
+    monkeypatch.setattr(sidebar, "is_fund_ticker", lambda _t: False)
+    monkeypatch.setattr(sidebar, "load_universe_snapshot", lambda: None)
+    monkeypatch.setattr(sidebar, "load_fund_universe_snapshot", lambda: None)
+
+    at = AppTest.from_function(_ticker_sidebar_app, default_timeout=15)
+    at.run()
+    assert not at.exception
+    assert at.text_input[0].value == "AAPL"
+
+    at.text_input[0].set_value("NVDA").run()
+    assert not at.exception
+    assert at.text_input[0].value == "NVDA"
+    texts = [str(getattr(el, "value", el)) for el in at.markdown]
+    assert any("ACTIVE:NVDA" in t for t in texts)
+
+
 def test_import_ui_fund_view():
     import ui.fund_view as fund_view
 

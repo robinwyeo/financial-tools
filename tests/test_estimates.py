@@ -49,3 +49,21 @@ def test_revision_factors_empty_without_tables():
     assert out["revision_magnitude"] is None
     assert out["earnings_surprise"] is None
     assert out["eps_trend_sparkline"] == []
+
+
+def test_surprise_already_a_fraction():
+    history = pd.DataFrame({"surprisePercent": [0.05]}, index=["0q"])
+    out = compute_revision_factors({"estimate_tables": {"earnings_history": history}})
+    assert out["earnings_surprise"] == pytest.approx(0.05)
+
+
+def test_revision_missing_columns_returns_none():
+    trend = pd.DataFrame({"foo": [1]}, index=["0y"])
+    revisions = pd.DataFrame({"bar": [1]}, index=["0y"])
+    history = pd.DataFrame({"baz": [1]}, index=["0q"])
+    out = compute_revision_factors(
+        {"estimate_tables": {"eps_trend": trend, "eps_revisions": revisions, "earnings_history": history}}
+    )
+    assert out["revision_agreement"] is None
+    assert out["revision_magnitude"] is None
+    assert out["earnings_surprise"] is None

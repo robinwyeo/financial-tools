@@ -1,16 +1,23 @@
 universe:
   name: sp500
+  # Add sp400 and/or tsx60 for a larger live cross-section. Backtest stays S&P 500.
+  # members: [sp500, sp400, tsx60]
+  members:
+    - sp500
   sector_scoring: true
 thresholds:
+  # legacy gate only (decision.mode: legacy); not calibrated in the current release.
   composite_min: 58.9
   bargain_min: 49.5
   coverage_min_pct: 70
   altman_z_min: 1.8
+  altman_zpp_min: 1.1
   uncertainty_medium_bump: 3
   uncertainty_high_bump: 6
   implied_upside_min_pct: 15
   require_implied_upside: false
   exclude_sell_consensus: true
+  exclude_underperform: true
 factor_weights:
   value: 0.25
   garp: 0.05
@@ -38,3 +45,69 @@ email:
   smtp_port: 587
   from_address: ''
   to_address: ''
+valuation:
+  hurdle:
+    floor: 0.08
+    # Update yearly from data/reference/damodaran_erp.csv (Damodaran implied ERP).
+    erp: 0.045
+    fallback_rf: 0.042
+    high_uncertainty_bump: 0.01
+  terminal_growth: 0.025
+  explicit_years: 10
+  fade_start_year: 5
+  base_growth_cap: 0.15
+  base_growth_floor: 0.0
+  bear_growth_multiplier: 0.5
+  bear_growth_cap: 0.04
+  bear_rate_bump: 0.01
+  subtract_sbc: true
+  normalization_years: 3
+  cyclical_normalization_years: 7
+  cyclical_sectors:
+    - Energy
+    - Basic Materials
+    - Industrials
+    - Consumer Cyclical
+  cyclical_industries:
+    - Semiconductors
+    - Semiconductor Equipment & Materials
+  min_tax_rate: 0.15
+  max_tax_rate: 0.35
+  expected_return_growth_cap: 0.06
+quality_weights:
+  profitability: 0.30
+  earnings_quality: 0.20
+  financial_strength: 0.20
+  stability: 0.15
+  capital_discipline: 0.15
+value_trap:
+  max_flags: 1
+  roic_hurdle: 0.08
+  revenue_cagr_min: 0.0
+  gross_margin_drop_max: 0.05
+  interest_coverage_min: 3.0
+  share_cagr_max: 0.03
+  accruals_max: 0.10
+  fcf_conversion_min: 0.50
+  net_debt_ebitda_max: 3.5
+  net_debt_ebitda_sector_caps:
+    Utilities: 6.0
+    Real Estate: 7.0
+    Communication Services: 4.5
+    Energy: 3.0
+decision:
+  mode: intrinsic
+  required_margin_of_safety:
+    Low: 0.20
+    Medium: 0.30
+    High: 0.40
+  min_quality_percentile: 40
+  max_value_trap_flags: 1
+  min_expected_return_over_hurdle: 0.0
+  block_on_data_quality_c: true
+providers:
+  fundamentals:
+    - edgar
+    - yahoo
+provenance:
+  run_id: null

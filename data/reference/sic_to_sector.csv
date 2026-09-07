@@ -1,0 +1,44 @@
+sic_from,sic_to,sector
+100,999,Consumer Defensive
+1000,1299,Basic Materials
+1300,1399,Energy
+1400,1499,Basic Materials
+1500,1799,Industrials
+2000,2099,Consumer Defensive
+2100,2199,Consumer Defensive
+2200,2399,Consumer Cyclical
+2400,2799,Industrials
+2800,2829,Basic Materials
+2830,2839,Healthcare
+2840,2899,Basic Materials
+2900,2999,Energy
+3000,3299,Industrials
+3300,3499,Basic Materials
+3500,3569,Industrials
+3570,3579,Technology
+3580,3599,Industrials
+3600,3699,Technology
+3700,3719,Consumer Cyclical
+3720,3799,Industrials
+3800,3819,Industrials
+3820,3859,Healthcare
+3860,3879,Technology
+3900,3999,Consumer Cyclical
+4000,4799,Industrials
+4800,4899,Communication Services
+4900,4999,Utilities
+5000,5199,Industrials
+5200,5399,Consumer Cyclical
+5400,5499,Consumer Defensive
+5500,5999,Consumer Cyclical
+6000,6499,Financial Services
+6500,6799,Real Estate
+7000,7369,Consumer Cyclical
+7370,7379,Technology
+7380,7999,Consumer Cyclical
+8000,8099,Healthcare
+8100,8299,Consumer Cyclical
+8300,8699,Industrials
+8700,8749,Industrials
+8750,8999,Communication Services
+9000,9999,Industrials

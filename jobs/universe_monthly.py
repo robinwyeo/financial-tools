@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Monthly job: refresh full S&P 500 snapshot and email universe scorecard."""
+"""Monthly job: refresh universe snapshot and email scorecard."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.config import load_config
+from core.config import get_universe_members, load_config
 from core.fund_universe import build_fund_universe_snapshot
+from core.rates import hurdle_rate
 from core.scoring import apply_universe_snapshot_scoring, score_ticker, score_universe_df
-from core.universe import build_universe_snapshot, fetch_sp500_tickers, load_universe_snapshot
+from core.universe import build_universe_snapshot, load_universe_snapshot
 from jobs.email_sender import email_is_enabled, format_scorecard_email, send_email, smtp_config_status
+from jobs.runlog import exceeds_failure_threshold, run_id_now, write_run_summary
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,33 +30,45 @@ def run_monthly(
     send_report: bool = True,
     fast_universe: bool = False,
 ) -> int:
+    started = time.monotonic()
+    run_id = run_id_now()
     config = load_config()
+    failures: list[dict[str, str]] = []
 
     if refresh_universe:
-        logger.info("Refreshing full universe snapshot (max=%s, fast=%s)", max_tickers, fast_universe)
+        members = get_universe_members(config)
+        logger.info(
+            "Refreshing universe snapshot (members=%s, max=%s, fast=%s)",
+            members,
+            max_tickers,
+            fast_universe,
+        )
         if fast_universe:
             from core.universe import _fallback_sp500
 
-            tickers = _fallback_sp500()
+            build_universe_snapshot(tickers=_fallback_sp500(), max_tickers=max_tickers)
         else:
-            tickers = fetch_sp500_tickers()
-        if max_tickers:
-            tickers = tickers[:max_tickers]
-        build_universe_snapshot(tickers=tickers)
+            build_universe_snapshot(universes=members, max_tickers=max_tickers)
 
         logger.info("Refreshing fund universe snapshot (US + Canadian ETFs and mutual funds)")
         try:
             build_fund_universe_snapshot()
         except Exception as exc:
             logger.warning("Fund universe snapshot refresh failed: %s", exc)
+            failures.append({"ticker": "_fund_universe", "error": str(exc)})
 
     uni = load_universe_snapshot()
     if uni is None or uni.empty:
-        logger.error("Universe snapshot is empty; cannot score S&P 500")
+        logger.error("Universe snapshot is empty; cannot score universe")
+        write_run_summary(
+            "universe_monthly",
+            {"ok": False, "error": "empty snapshot", "failures": failures},
+            run_id=run_id,
+        )
         return 1
 
     tickers = uni["ticker"].astype(str).str.upper().tolist()
-    logger.info("Scoring S&P 500 universe (%d tickers)", len(tickers))
+    logger.info("Scoring universe (%d tickers)", len(tickers))
 
     scored_universe = score_universe_df(uni, config)
     results = []
@@ -68,42 +83,74 @@ def run_monthly(
             results.append(result)
             if i % 25 == 0 or i == len(tickers):
                 buy_count = sum(1 for r in results if r.get("is_good_buy"))
-                logger.info("Progress: %d / %d scored (%d Buy so far)", i, len(tickers), buy_count)
+                logger.info("Progress: %d / %d scored (%d Accumulate so far)", i, len(tickers), buy_count)
         except Exception as exc:
             logger.warning("Failed to score %s: %s", ticker, exc)
+            failures.append({"ticker": ticker, "error": str(exc)})
 
     buy_count = sum(1 for r in results if r.get("is_good_buy"))
-    logger.info("Monthly scan complete: %d Buy / %d scored", buy_count, len(results))
+    logger.info("Monthly scan complete: %d Accumulate / %d scored", buy_count, len(results))
 
+    snapshot_date = None
+    if "snapshot_date" in uni.columns and not uni.empty:
+        snapshot_date = str(uni["snapshot_date"].iloc[0])
+    hurdle = hurdle_rate()
+    email_ok = True
     if send_report and email_is_enabled(config):
         ready, status = smtp_config_status(config)
         logger.info("Email config: %s", status)
         subject, body = format_scorecard_email(
             results,
             config,
-            title="Monthly S&P 500 Scorecard",
-            subtitle=f"Full universe scan — {len(results)} ticker(s). Buys listed first.",
+            title="Monthly Universe Scorecard",
+            subtitle=f"Full universe scan — {len(results)} ticker(s). Accumulate listed first.",
+            snapshot_date=snapshot_date,
+            run_id=run_id,
+            hurdle_rate=hurdle.get("rate"),
         )
         sent, message = send_email(subject, body, config)
         if sent:
             logger.info("Monthly scorecard email sent (%s)", message)
         else:
             logger.error("Email not sent: %s", message)
-            return 1
+            email_ok = False
     elif send_report:
         logger.info("Email disabled; set email.enabled or SMTP_PASSWORD in environment")
 
+    attempted = len(tickers)
+    failed_n = len([f for f in failures if f.get("ticker") != "_fund_universe"])
+    too_many = exceeds_failure_threshold(failed_n, attempted)
+    write_run_summary(
+        "universe_monthly",
+        {
+            "ok": email_ok and not too_many,
+            "attempted": attempted,
+            "scored": len(results),
+            "accumulate": buy_count,
+            "failed": failed_n,
+            "failures": failures[:50],
+            "snapshot_date": snapshot_date,
+            "hurdle": hurdle.get("rate"),
+            "duration_s": round(time.monotonic() - started, 2),
+        },
+        run_id=run_id,
+    )
+    if too_many:
+        logger.error("Failure ratio %d/%d exceeds 10%%", failed_n, attempted)
+        return 1
+    if not email_ok:
+        return 1
     return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Monthly S&P 500 scorecard email")
+    parser = argparse.ArgumentParser(description="Monthly universe scorecard email")
     parser.add_argument("--no-refresh", action="store_true", help="Skip universe refresh")
     parser.add_argument(
         "--max",
         type=int,
         default=None,
-        help="Max tickers to score (default: full snapshot / S&P 500)",
+        help="Max tickers to score (default: full snapshot)",
     )
     parser.add_argument("--no-email", action="store_true", help="Skip email sending")
     parser.add_argument("--fast", action="store_true", help="Use smaller fallback universe")

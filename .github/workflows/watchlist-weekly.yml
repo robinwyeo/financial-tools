@@ -12,6 +12,7 @@ permissions:
 jobs:
   watchlist-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.lock
 
       - name: Validate SMTP secrets
         env:
@@ -48,4 +49,13 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python jobs/watchlist_weekly.py
+
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-run-summary
+          path: data/runs/
+          if-no-files-found: warn

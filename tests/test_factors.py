@@ -1,13 +1,19 @@
 """Tests for factor computations."""
 
 import pandas as pd
+import pytest
 
 from core.analysts import recommendation_period_shift
 from core.factors import (
+    compute_altman_z,
+    compute_altman_z_double_prime,
     compute_balance_sheet_strength,
+    compute_capital_efficiency,
+    compute_leverage_metrics,
     compute_piotroski_f_score,
     compute_shareholder_yield,
     compute_graham_value,
+    compute_value_factors,
     FACTOR_SCORE_COLUMNS,
 )
 
@@ -123,3 +129,95 @@ def test_downside_protection_not_in_factor_score_columns():
     all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
     assert "downside_protection" not in all_sub_cols
     assert "downside_protection" not in FACTOR_SCORE_COLUMNS
+
+
+def test_altman_z_requires_all_components():
+    complete = {
+        "current_assets": 40.0,
+        "current_liabilities": 20.0,
+        "retained_earnings": 30.0,
+        "ebit": 10.0,
+        "total_assets": 100.0,
+        "total_liabilities": 50.0,
+        "market_cap": 80.0,
+        "revenue": 90.0,
+    }
+    z = compute_altman_z(complete)["altman_z"]
+    assert z is not None
+    missing = dict(complete)
+    missing["retained_earnings"] = None
+    assert compute_altman_z(missing)["altman_z"] is None
+
+
+def test_altman_z_double_prime():
+    raw = {
+        "current_assets": 40.0,
+        "current_liabilities": 20.0,
+        "retained_earnings": 30.0,
+        "ebit": 10.0,
+        "total_assets": 100.0,
+        "total_liabilities": 50.0,
+        "book_equity": 50.0,
+    }
+    x1, x2, x3, x4 = 0.20, 0.30, 0.10, 1.0
+    expected = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
+    assert compute_altman_z_double_prime(raw)["altman_z_pp"] == pytest.approx(expected)
+    raw["ebit"] = None
+    assert compute_altman_z_double_prime(raw)["altman_z_pp"] is None
+
+
+def test_value_factors_do_not_use_book_value_times_shares():
+    """Yahoo BVPS × shares is not book equity (BRK-B dual-class blow-up)."""
+    out = compute_value_factors(
+        {"book_value": 400_000, "shares_outstanding": 2e9, "market_cap": 900e9}
+    )
+    assert out["book_to_market"] is None
+
+
+def test_roic_floors_at_ten_percent_of_assets_and_clips():
+    cash_rich = {
+        "ebit": 50.0,
+        "current_assets": 100.0,
+        "current_liabilities": 90.0,
+        "total_cash": 95.0,
+        "short_term_debt": 0.0,
+        "ppe_net": 1.0,
+        "total_assets": 200.0,
+    }
+    out = compute_capital_efficiency(cash_rich)
+    assert out["invested_capital"] == pytest.approx(20.0)
+    assert out["roic"] == pytest.approx(2.0)  # 50/20 = 2.5 clipped to 2.0
+    assert out["roic_basis"] == "nwc_ppe"
+
+
+def test_roic_none_when_cash_missing():
+    """Missing cash must not be treated as 0 in NWC or equity+debt IC."""
+    raw = {
+        "ebit": 50.0,
+        "current_assets": 100.0,
+        "current_liabilities": 90.0,
+        "total_cash": None,
+        "ppe_net": 40.0,
+        "total_assets": 200.0,
+        "total_debt": 30.0,
+        "book_equity": 80.0,
+    }
+    out = compute_capital_efficiency(raw)
+    assert out["roic"] is None
+    assert out["invested_capital"] is None
+
+
+def test_leverage_metrics_nd_ebitda_and_coverage():
+    raw = {
+        "ebit": 10.0,
+        "depreciation": 2.0,
+        "total_debt": 24.0,
+        "total_cash": 4.0,
+        "interest_expense": 2.0,
+    }
+    out = compute_leverage_metrics(raw)
+    assert out["ebitda"] == pytest.approx(12.0)
+    assert out["net_debt_to_ebitda"] == pytest.approx(20.0 / 12.0)
+    assert out["interest_coverage"] == pytest.approx(5.0)
+    raw["interest_expense"] = 0.0
+    assert compute_leverage_metrics(raw)["interest_coverage"] is None

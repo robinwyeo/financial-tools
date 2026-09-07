@@ -47,6 +47,45 @@ def _child_text(node: ET.Element | None, *names: str) -> str | None:
     return None
 
 
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _footnote_map(root: ET.Element) -> dict[str, str]:
+    notes: dict[str, str] = {}
+    for node in root.iter():
+        if _local(node.tag).lower() not in {"footnote", "footnotes"}:
+            continue
+        fid = node.attrib.get("id") or node.attrib.get("footnoteId") or ""
+        text = " ".join(node.itertext()).strip()
+        if fid:
+            notes[fid] = text
+        elif text:
+            notes.setdefault("_all", "")
+            notes["_all"] = (notes["_all"] + " " + text).strip()
+    return notes
+
+
+def _transaction_is_10b5_1(tx_node: ET.Element, root: ET.Element) -> bool:
+    """True when the transaction is tagged as a Rule 10b5-1 planned trade."""
+    notes = _footnote_map(root)
+    blob = " ".join(notes.values()).lower()
+    ids: list[str] = []
+    for node in tx_node.iter():
+        fid = node.attrib.get("footnoteId") or node.attrib.get("id")
+        if fid:
+            ids.append(fid)
+        if _local(node.tag).lower() == "footnoteid" and (node.text or "").strip():
+            ids.append(node.text.strip())
+    pointed = " ".join(notes.get(i, "") for i in ids).lower()
+    haystack = pointed or blob
+    if "10b5-1" in haystack or "10b5–1" in haystack:
+        if ids and not pointed:
+            return "10b5-1" in blob or "10b5–1" in blob
+        return True
+    return False
+
+
 def parse_form4_xml(xml_text: str) -> list[dict[str, Any]]:
     """Parse open-market P/S transactions out of a Form 4 ownership XML."""
     try:
@@ -56,6 +95,8 @@ def parse_form4_xml(xml_text: str) -> list[dict[str, Any]]:
 
     insider = _child_text(root, "rptOwnerName") or "unknown"
     title = _child_text(root, "officerTitle") or ""
+    is_officer = _truthy(_child_text(root, "isOfficer")) or bool(title)
+    is_director = _truthy(_child_text(root, "isDirector"))
     rows: list[dict[str, Any]] = []
     for node in root.iter():
         if _local(node.tag) != "nonDerivativeTransaction":
@@ -82,6 +123,9 @@ def parse_form4_xml(xml_text: str) -> list[dict[str, Any]]:
                 "price": price,
                 "value": value,
                 "date": tx_date,
+                "is_officer": is_officer,
+                "is_director": is_director,
+                "planned_10b5_1": _transaction_is_10b5_1(node, root),
             }
         )
     return rows
@@ -178,8 +222,12 @@ def compute_insider_factor(raw: dict[str, Any]) -> dict[str, Any]:
         value = _safe_float(tx.get("value")) or 0.0
         net_value += value
         name = str(tx.get("insider") or "unknown")
+        officerish = tx.get("is_officer")
+        directorish = tx.get("is_director")
+        is_od = True if officerish is None and directorish is None else bool(officerish or directorish)
         if tx.get("code") == "P":
-            buyers.add(name)
+            if is_od and not tx.get("planned_10b5_1"):
+                buyers.add(name)
         elif tx.get("code") == "S":
             sellers.add(name)
 

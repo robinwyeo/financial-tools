@@ -20,13 +20,8 @@ def compute_value_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     ev = raw.get("enterprise_value")
     ebit = raw.get("ebit")
     market_cap = raw.get("market_cap")
-    book_value = raw.get("book_value")
-    shares = raw.get("shares_outstanding")
     fcf = raw.get("free_cashflow")
-
-    book_equity = None
-    if book_value is not None and shares is not None:
-        book_equity = book_value * shares
+    book_equity = raw.get("book_equity")
 
     earnings_yield = _ratio(ebit, ev)
     book_to_market = _ratio(book_equity, market_cap)
@@ -48,12 +43,8 @@ def compute_quality_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     gross_profit = raw.get("gross_profit")
     total_assets = raw.get("total_assets")
     net_income = raw.get("net_income")
-    market_cap = raw.get("market_cap")
-    book_value = raw.get("book_value")
-    shares = raw.get("shares_outstanding")
     revenue = raw.get("revenue")
-
-    book_equity = book_value * shares if book_value and shares else None
+    book_equity = raw.get("book_equity")
 
     gross_profitability = _ratio(gross_profit, total_assets)
     roa = _ratio(net_income, total_assets)
@@ -223,6 +214,7 @@ def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | Non
     total_cash = raw.get("total_cash")
     total_debt = raw.get("total_debt")
     market_cap = raw.get("market_cap")
+    book_equity = raw.get("book_equity")
     debt_to_equity = raw.get("debt_to_equity")
 
     net_cash = None
@@ -231,8 +223,17 @@ def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | Non
 
     net_cash_to_mcap = _ratio(net_cash, market_cap)
 
+    negative_equity = False
+    if book_equity is not None and book_equity <= 0:
+        negative_equity = True
+
+    if book_equity is not None and book_equity > 0 and total_debt is not None:
+        debt_to_equity = total_debt / book_equity
+
     low_leverage = None
-    if debt_to_equity is not None:
+    if negative_equity:
+        low_leverage = None
+    elif debt_to_equity is not None:
         if debt_to_equity <= 0:
             low_leverage = 1.0
         else:
@@ -242,6 +243,8 @@ def compute_balance_sheet_strength(raw: dict[str, Any]) -> dict[str, float | Non
         "net_cash": net_cash,
         "net_cash_to_mcap": net_cash_to_mcap,
         "low_leverage": low_leverage,
+        "negative_equity": negative_equity,
+        "debt_to_equity": debt_to_equity,
     }
 
 
@@ -253,7 +256,11 @@ def compute_graham_value(raw: dict[str, Any]) -> dict[str, float | None]:
     """
     price = raw.get("price")
     trailing_eps = raw.get("trailing_eps")
-    book_value = raw.get("book_value")  # BVPS from yfinance
+    book_value = raw.get("book_value")  # BVPS
+    book_equity = raw.get("book_equity")
+    shares = raw.get("shares_outstanding")
+    if book_equity is not None and shares and shares > 0:
+        book_value = book_equity / shares
     current_ratio = raw.get("current_ratio_info")
     current_assets = raw.get("current_assets")
     current_liabilities = raw.get("current_liabilities")
@@ -361,46 +368,137 @@ def compute_shareholder_yield(raw: dict[str, Any]) -> dict[str, float | None]:
 
 def compute_capital_efficiency(raw: dict[str, Any]) -> dict[str, float | None]:
     """
-    Greenblatt Magic Formula return on invested capital.
-    roic = ebit / invested_capital
-    invested_capital = total_debt + book_equity - total_cash (floored at 1 to avoid distortion)
-    Higher ROIC = better capital allocation.
+    Return on invested capital.
+
+    Preferred invested capital = NWC ex-cash + net PPE.
+    Fallback = equity + debt - cash. Floor IC at 10% of total assets and clip
+    ROIC to [-1, 2] so cash-rich / dual-class names cannot dominate the rank.
     """
     ebit = raw.get("ebit")
     total_debt = raw.get("total_debt")
-    book_value = raw.get("book_value")
-    shares = raw.get("shares_outstanding")
+    book_equity = raw.get("book_equity")
     total_cash = raw.get("total_cash")
-
-    book_equity = book_value * shares if book_value is not None and shares is not None else None
+    current_assets = raw.get("current_assets")
+    current_liabilities = raw.get("current_liabilities")
+    short_term_debt = raw.get("short_term_debt") or raw.get("debt_st")
+    ppe_net = raw.get("ppe_net")
+    total_assets = raw.get("total_assets")
 
     invested_capital = None
+    roic_basis = None
+    if (
+        current_assets is not None
+        and current_liabilities is not None
+        and ppe_net is not None
+        and total_cash is not None
+    ):
+        st_debt = short_term_debt or 0.0
+        nwc_ex_cash = (current_assets - total_cash) - (current_liabilities - st_debt)
+        invested_capital = nwc_ex_cash + ppe_net
+        roic_basis = "nwc_ppe"
+    elif total_debt is not None and book_equity is not None and total_cash is not None:
+        invested_capital = total_debt + book_equity - total_cash
+        roic_basis = "equity_debt_cash"
+
+    if invested_capital is not None and total_assets and total_assets > 0:
+        invested_capital = max(invested_capital, 0.10 * total_assets)
+
     roic = None
-
-    if total_debt is not None and book_equity is not None:
-        ic = total_debt + book_equity - (total_cash or 0.0)
-        floor = max(abs(book_equity) * 0.01, 1.0) if book_equity else 1.0
-        invested_capital = max(ic, floor)
-
     if ebit is not None and invested_capital is not None and invested_capital > 0:
         roic = ebit / invested_capital
+        roic = max(-1.0, min(2.0, roic))
 
     return {
         "invested_capital": invested_capital,
         "roic": roic,
+        "roic_basis": roic_basis,
+    }
+
+
+def compute_leverage_metrics(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Net debt / EBITDA and EBIT / interest. Missing interest → coverage None."""
+    ebit = raw.get("ebit")
+    da = raw.get("depreciation")
+    total_debt = raw.get("total_debt")
+    total_cash = raw.get("total_cash")
+    interest = raw.get("interest_expense")
+
+    ebitda = None
+    if ebit is not None:
+        ebitda = ebit + (da or 0.0)
+
+    net_debt = None
+    if total_debt is not None and total_cash is not None:
+        net_debt = total_debt - total_cash
+    elif total_debt is not None:
+        net_debt = total_debt
+
+    net_debt_to_ebitda = None
+    if net_debt is not None and ebitda and ebitda > 0:
+        net_debt_to_ebitda = net_debt / ebitda
+
+    interest_coverage = None
+    if ebit is not None and interest is not None and interest > 0:
+        interest_coverage = ebit / interest
+
+    return {
+        "ebitda": ebitda,
+        "net_debt": net_debt,
+        "net_debt_to_ebitda": net_debt_to_ebitda,
+        "interest_coverage": interest_coverage,
+        "leverage_quality": None if net_debt_to_ebitda is None else -float(net_debt_to_ebitda),
+        "equity_to_assets": _ratio(raw.get("book_equity") or raw.get("equity"), raw.get("total_assets")),
+        "ev_to_ebit": _ratio(raw.get("enterprise_value"), raw.get("ebit")),
+        "p_to_oe": raw.get("p_to_oe"),
+        "owner_earnings_norm": raw.get("owner_earnings_norm"),
+    }
+
+
+def compute_fcf_conversion(raw: dict[str, Any]) -> dict[str, float | None]:
+    """FCF margin and 3y FCF/NI conversion (pass-through of history metrics)."""
+    revenue = raw.get("revenue")
+    fcf = raw.get("free_cashflow")
+    ocf = raw.get("operating_cashflow")
+    capex = raw.get("capex")
+    if fcf is None and ocf is not None:
+        fcf = float(ocf) - abs(float(capex or 0.0))
+    fcf_margin = _ratio(fcf, revenue)
+    fcf_conversion_3y = raw.get("fcf_conversion_3y")
+    return {"fcf_margin": fcf_margin, "fcf_conversion_3y": fcf_conversion_3y}
+
+
+def compute_dilution(raw: dict[str, Any]) -> dict[str, float | None]:
+    """Share-count CAGR; anti_dilution is the inverted rank input."""
+    share_cagr_3y = raw.get("share_cagr_3y")
+    if share_cagr_3y is None:
+        shares = raw.get("shares_outstanding")
+        prior = raw.get("shares_prior")
+        if shares and prior and prior > 0:
+            share_cagr_3y = (float(shares) / float(prior)) - 1.0
+    anti_dilution = None if share_cagr_3y is None else -float(share_cagr_3y)
+    return {"share_cagr_3y": share_cagr_3y, "anti_dilution": anti_dilution}
+
+
+def compute_stability(raw: dict[str, Any]) -> dict[str, float | None]:
+    """5y ROIC mean/std, gross-margin change, revenue CAGR. Lower vol ranks higher."""
+    roic_5y_mean = raw.get("roic_5y_mean")
+    roic_5y_std = raw.get("roic_5y_std")
+    gross_margin_5y_delta = raw.get("gross_margin_5y_delta")
+    revenue_5y_cagr = raw.get("revenue_5y_cagr")
+    stability_roic = None if roic_5y_std is None else -float(roic_5y_std)
+    return {
+        "roic_5y_mean": roic_5y_mean,
+        "roic_5y_std": roic_5y_std,
+        "stability_roic": stability_roic,
+        "gross_margin_5y_delta": gross_margin_5y_delta,
+        "revenue_5y_cagr": revenue_5y_cagr,
     }
 
 
 def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
     """
-    Altman Z-Score (1968): multi-ratio distress predictor.
-    Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
-      X1 = working capital / total assets
-      X2 = retained earnings / total assets
-      X3 = EBIT / total assets
-      X4 = market cap / total liabilities
-      X5 = revenue / total assets
-    Higher Z = lower distress risk.
+    Altman Z-Score (1968). All five components required; missing any → None
+    (no partial-component renormalization).
     """
     current_assets = raw.get("current_assets")
     current_liabilities = raw.get("current_liabilities")
@@ -413,37 +511,57 @@ def compute_altman_z(raw: dict[str, Any]) -> dict[str, float | None]:
 
     if not total_assets or total_assets <= 0:
         return {"altman_z": None}
-
-    x1 = x2 = x3 = x4 = x5 = None
-
-    if current_assets is not None and current_liabilities is not None:
-        x1 = (current_assets - current_liabilities) / total_assets
-
-    if retained_earnings is not None:
-        x2 = retained_earnings / total_assets
-
-    if ebit is not None:
-        x3 = ebit / total_assets
-
-    if market_cap is not None and total_liabilities and total_liabilities > 0:
-        x4 = market_cap / total_liabilities
-
-    if revenue is not None:
-        x5 = revenue / total_assets
-
-    components = [x1, x2, x3, x4, x5]
-    weights = [1.2, 1.4, 3.3, 0.6, 1.0]
-
-    available = [(w, v) for w, v in zip(weights, components) if v is not None]
-    if not available:
+    if current_assets is None or current_liabilities is None:
+        return {"altman_z": None}
+    if retained_earnings is None or ebit is None:
+        return {"altman_z": None}
+    if market_cap is None or not total_liabilities or total_liabilities <= 0:
+        return {"altman_z": None}
+    if revenue is None:
         return {"altman_z": None}
 
-    total_weight = sum(w for w, _ in available)
-    full_weight = sum(weights)
-    z_partial = sum(w * v for w, v in available)
-    altman_z = z_partial * (full_weight / total_weight) if total_weight > 0 else None
-
+    x1 = (current_assets - current_liabilities) / total_assets
+    x2 = retained_earnings / total_assets
+    x3 = ebit / total_assets
+    x4 = market_cap / total_liabilities
+    x5 = revenue / total_assets
+    altman_z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
     return {"altman_z": altman_z}
+
+
+def compute_altman_z_double_prime(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Altman Z'' (1995) for non-manufacturers:
+    Z'' = 6.56*X1 + 3.26*X2 + 6.72*X3 + 1.05*X4
+      X1 = working capital / total assets
+      X2 = retained earnings / total assets
+      X3 = EBIT / total assets
+      X4 = book equity / total liabilities
+    All four components required.
+    """
+    current_assets = raw.get("current_assets")
+    current_liabilities = raw.get("current_liabilities")
+    retained_earnings = raw.get("retained_earnings")
+    ebit = raw.get("ebit")
+    total_assets = raw.get("total_assets")
+    total_liabilities = raw.get("total_liabilities")
+    book_equity = raw.get("book_equity")
+
+    if not total_assets or total_assets <= 0:
+        return {"altman_z_pp": None}
+    if current_assets is None or current_liabilities is None:
+        return {"altman_z_pp": None}
+    if retained_earnings is None or ebit is None:
+        return {"altman_z_pp": None}
+    if book_equity is None or not total_liabilities or total_liabilities <= 0:
+        return {"altman_z_pp": None}
+
+    x1 = (current_assets - current_liabilities) / total_assets
+    x2 = retained_earnings / total_assets
+    x3 = ebit / total_assets
+    x4 = book_equity / total_liabilities
+    z_pp = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
+    return {"altman_z_pp": z_pp}
 
 
 def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
@@ -465,7 +583,12 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
     out.update(compute_earnings_quality(raw))
     out.update(compute_shareholder_yield(raw))
     out.update(compute_capital_efficiency(raw))
+    out.update(compute_leverage_metrics(raw))
+    out.update(compute_fcf_conversion(raw))
+    out.update(compute_dilution(raw))
+    out.update(compute_stability(raw))
     out.update(compute_altman_z(raw))
+    out.update(compute_altman_z_double_prime(raw))
     revisions = compute_revision_factors(raw)
     out["revision_agreement"] = revisions.get("revision_agreement")
     out["revision_magnitude"] = revisions.get("revision_magnitude")
@@ -480,7 +603,7 @@ def compute_all_factors(raw: dict[str, Any]) -> dict[str, float | None]:
 # available sub-signal percentiles → group percentile score.
 # Composite = weighted average of group percentile scores.
 #
-# graham_ratio is intentionally NOT in the value group: it already drives 40%
+# graham_ratio is intentionally NOT in the value group: it already drives 55%
 # of the bargain score, and including it here double-counted the same signal
 # across both legs of the Buy gate.
 FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
@@ -500,6 +623,31 @@ FACTOR_SCORE_COLUMNS: dict[str, list[str]] = {
         "earnings_surprise",
     ],
     "insider": ["insider_buying"],
+}
+
+# Five-bucket quality screen (Layer A). Higher-is-better rank inputs.
+QUALITY_SCORE_COLUMNS: dict[str, list[str]] = {
+    "profitability": ["gross_profitability", "roic", "fcf_margin"],
+    "earnings_quality": ["earnings_quality", "fcf_conversion_3y"],
+    "financial_strength": ["financial_strength", "leverage_quality", "interest_coverage"],
+    "stability": ["roic_5y_mean", "stability_roic", "gross_margin_5y_delta", "revenue_5y_cagr"],
+    "capital_discipline": ["shareholder_yield", "investment", "anti_dilution"],
+}
+
+QUALITY_SUB_BUCKETS: dict[str, list[list[str]]] = {
+    "profitability": [["gross_profitability"], ["roic"], ["fcf_margin"]],
+    "earnings_quality": [["earnings_quality"], ["fcf_conversion_3y"]],
+    "financial_strength": [["financial_strength"], ["leverage_quality"], ["interest_coverage"]],
+    "stability": [["roic_5y_mean"], ["stability_roic"], ["gross_margin_5y_delta"], ["revenue_5y_cagr"]],
+    "capital_discipline": [["shareholder_yield"], ["investment"], ["anti_dilution"]],
+}
+
+FINANCIALS_QUALITY_COLUMNS: dict[str, list[str]] = {
+    "profitability": ["roe", "roa"],
+    "earnings_quality": ["earnings_quality"],
+    "financial_strength": ["equity_to_assets"],
+    "stability": ["roic_5y_mean", "stability_roic", "revenue_5y_cagr"],
+    "capital_discipline": ["anti_dilution"],
 }
 
 # Sub-buckets de-correlate a factor group before averaging: sub-signal

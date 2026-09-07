@@ -11,6 +11,8 @@ def _sample_result(ticker: str, *, is_buy: bool, composite: float) -> dict:
         "bargain": {"score": 55.0},
         "analyst": {"implied_upside_pct": 20.0},
         "is_good_buy": is_buy,
+        "price": 100.0,
+        "currency": "CAD",
     }
 
 
@@ -44,10 +46,23 @@ def test_format_scorecard_email_lists_buy_first():
         {"thresholds": {"composite_min": 50, "bargain_min": 50, "implied_upside_min_pct": 15}},
         title="Test Scorecard",
     )
-    assert "1 Buy / 2 total" in subject
+    assert "1 Accumulate / 2 total" in subject
     assert html.index("AAA") < html.index("ZZZ")
-    assert "Buy" in html
-    assert "Not Buy" in html
-    assert "Composite" in html
-    assert "Bargain" in html
-    assert "not a hard gate" in html
+    assert "Accumulate" in html or "Avoid" in html
+    assert "Buy-below" in html
+    assert "C$100.00" in html
+    assert "Why" in html
+
+
+def test_format_scorecard_email_footer_has_run_metadata():
+    _, html = format_scorecard_email(
+        [_sample_result("AAA", is_buy=True, composite=60)],
+        {"thresholds": {"composite_min": 50, "bargain_min": 50, "implied_upside_min_pct": 15}},
+        title="Test",
+        snapshot_date="2026-09-01",
+        run_id="20260906T000000Z",
+        hurdle_rate=0.087,
+    )
+    assert "snapshot 2026-09-01" in html
+    assert "run_id 20260906T000000Z" in html
+    assert "hurdle 8.7%" in html

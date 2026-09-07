@@ -17,7 +17,7 @@ permissions:
 jobs:
   universe-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 420
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +27,10 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.lock
+
+      - name: Run tests
+        run: pytest tests/ -q
 
       - name: Validate SMTP secrets
         env:
@@ -54,6 +57,7 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           extra=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_refresh }}" = "true" ]; then
@@ -61,11 +65,20 @@ jobs:
           fi
           python jobs/universe_monthly.py $extra
 
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-run-summary
+          path: data/runs/
+          if-no-files-found: warn
+
       - name: Commit updated snapshot
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/universe_snapshot.parquet || true
-          git add data/fund_universe_snapshot.parquet || true
+          git add data/universe_snapshot.parquet data/universe_snapshot.meta.json
+          git add data/fund_universe_snapshot.parquet data/fund_universe_snapshot.meta.json
           git diff --staged --quiet || git commit -m "chore: refresh universe snapshots (monthly) [skip ci]"
-          git push || true
+          git push

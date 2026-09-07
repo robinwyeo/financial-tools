@@ -45,6 +45,9 @@ def compute_uncertainty(
     target_low: float | None = None,
     target_mean: float | None = None,
     thresholds: dict[str, Any] | None = None,
+    data_quality_grade: str | None = None,
+    dcf_base: float | None = None,
+    dcf_bear: float | None = None,
 ) -> dict[str, Any]:
     """
     Morningstar-style uncertainty badge: Low / Medium / High.
@@ -75,6 +78,15 @@ def compute_uncertainty(
     if volatility_12m is not None and volatility_12m > vol_cut:
         points += 1
     if dispersion is not None and dispersion > disp_cut:
+        points += 1
+    if str(data_quality_grade or "").upper() == "B":
+        points += 1
+    if (
+        dcf_base is not None
+        and dcf_bear is not None
+        and dcf_base > 0
+        and abs(dcf_base - dcf_bear) / dcf_base > 0.50
+    ):
         points += 1
 
     if points >= 2:

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from backtest.constants import (
@@ -252,67 +253,46 @@ def run_dca_validation(
     panel: pd.DataFrame | None = None,
     delist_sensitivity: list[float] | None = None,
 ) -> dict[str, Any]:
+    from backtest.data.constituents import load_membership, price_coverage_pct
+    from backtest.stats import write_results_json
+
+    del delist_sensitivity  # inert table removed; delist_return still applies mid-life
     panel = panel if panel is not None else load_factor_panel()
     prices = ensure_benchmark_prices(load_prices())
-    delist_sensitivity = delist_sensitivity or [0.0, DEFAULT_DELIST_RETURN, -1.0]
     quarter_ends = sorted(panel["quarter_end"].unique())
 
-    # Score once per weight set; delist sensitivity only affects simulation.
     logger.info("Scoring panel for old weights")
     scored_old = score_factor_panel(panel, old_weights)
     logger.info("Scoring panel for new weights")
     scored_new = score_factor_panel(panel, new_weights)
     spy = _spy_dca_benchmark(prices, quarter_ends)
 
-    def run_all(delist_return: float) -> dict[str, Any]:
-        old = _simulate_dca(
-            scored_old,
-            prices,
-            old_thresholds["composite_min"],
-            old_thresholds["bargain_min"],
-            "buy_and_hold",
-            delist_return,
-        )
-        new = _simulate_dca(
-            scored_new,
-            prices,
-            new_thresholds["composite_min"],
-            new_thresholds["bargain_min"],
-            "buy_and_hold",
-            delist_return,
-        )
-        return {
-            "delist_return": delist_return,
-            "old_buy_hold": old,
-            "new_buy_hold": new,
-            "spy": spy,
-        }
+    old = _simulate_dca(
+        scored_old,
+        prices,
+        old_thresholds["composite_min"],
+        old_thresholds["bargain_min"],
+        "buy_and_hold",
+        DEFAULT_DELIST_RETURN,
+    )
+    new = _simulate_dca(
+        scored_new,
+        prices,
+        new_thresholds["composite_min"],
+        new_thresholds["bargain_min"],
+        "buy_and_hold",
+        DEFAULT_DELIST_RETURN,
+    )
 
-    sensitivity = []
-    for dr in delist_sensitivity:
-        res = run_all(dr)
-        old = res["old_buy_hold"]
-        new = res["new_buy_hold"]
-        sensitivity.append(
-            {
-                "delist_return": dr,
-                "old_terminal_wealth": old.terminal_wealth,
-                "new_terminal_wealth": new.terminal_wealth,
-                "spy_terminal_wealth": spy.terminal_wealth,
-                "old_total_return": old.total_return,
-                "new_total_return": new.total_return,
-                "spy_total_return": spy.total_return,
-                "old_cagr": old.cagr,
-                "new_cagr": new.cagr,
-                "spy_cagr": spy.cagr,
-                "old_vs_spy_wealth_delta": old.terminal_wealth - spy.terminal_wealth,
-                "new_vs_spy_wealth_delta": new.terminal_wealth - spy.terminal_wealth,
-            }
-        )
-
-    base = run_all(DEFAULT_DELIST_RETURN)
-    old = base["old_buy_hold"]
-    new = base["new_buy_hold"]
+    coverage_rows: list[dict[str, Any]] = []
+    mean_coverage = None
+    try:
+        membership = load_membership()
+        coverage_rows = price_coverage_pct(membership, prices)
+        if coverage_rows:
+            mean_coverage = float(np.mean([r["price_coverage_pct"] for r in coverage_rows]))
+    except Exception as exc:
+        logger.debug("Price coverage unavailable: %s", exc)
 
     payload = {
         "simulation": {
@@ -323,8 +303,16 @@ def run_dca_validation(
             "period_start": spy.period_start or old.period_start,
             "period_end": spy.period_end or old.period_end,
             "quarters_with_investment": spy.quarters_invested,
+            "in_sample": True,
+            "survivorship_biased": True,
         },
         "default_delist_return": DEFAULT_DELIST_RETURN,
+        "delist_note": (
+            "DEFAULT_DELIST_RETURN applies only when a held name loses prices mid-life; "
+            "names with no price at pick time are never bought."
+        ),
+        "price_coverage": coverage_rows,
+        "price_coverage_pct": mean_coverage,
         "old_weights": old_weights,
         "new_weights": new_weights,
         "old_thresholds": old_thresholds,
@@ -339,9 +327,6 @@ def run_dca_validation(
             "new_vs_spy": _comparison_row("new_vs_spy", new, spy, vs_spy=True),
             "new_vs_old": _comparison_row("new_vs_old", new, old, vs_spy=False),
         },
-        "survivorship_sensitivity": sensitivity,
     }
-    path = RESULTS_DIR / "dca_validation.json"
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    write_results_json(RESULTS_DIR / "dca_validation.json", payload)
     return payload

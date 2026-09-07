@@ -1,76 +1,52 @@
-"""SEC EDGAR Financial Statement Data Sets ingestion."""
+"""SEC EDGAR companyfacts ingestion for the backtest harness.
+
+Public names are preserved: ``load_fundamentals``, ``fundamentals_as_of``,
+``fetch_cik_ticker_map``, ``EDGAR_FUNDAMENTALS_PATH``, ``CIK_TICKER_PATH``.
+The store is now consolidated companyfacts rows (not FSDS num.txt).
+"""
 
 from __future__ import annotations
 
-import io
 import logging
-import zipfile
-from datetime import date, datetime
-from pathlib import Path
+from datetime import date
 from typing import Iterable
 
 import pandas as pd
-import requests
 
 from backtest.constants import DATA_STORE, SEC_USER_AGENT
+from core.edgar_facts import (
+    fetch_companyfacts,
+    facts_to_rows,
+    flatten_fundamentals,
+    fundamentals_as_of_structured,
+    rows_from_bulk_zip,
+)
+from core.sec import ticker_to_cik
 
 logger = logging.getLogger(__name__)
 
 EDGAR_STORE = DATA_STORE / "edgar"
 EDGAR_FUNDAMENTALS_PATH = EDGAR_STORE / "fundamentals.parquet"
 CIK_TICKER_PATH = EDGAR_STORE / "cik_ticker_map.parquet"
+BULK_ZIP_PATH = EDGAR_STORE / "companyfacts.zip"
 
-SEC_DATASETS_URL = "https://www.sec.gov/files/dera/data/financial-statement-data-sets"
+# Companyfacts rows (not legacy FSDS num.txt: amount/period, no end/filed).
+COMPANYFACTS_REQUIRED_COLUMNS = frozenset({"end", "filed", "qtrs", "field", "val", "tag"})
+
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
-
-# Primary us-gaap tags mapped to internal field names.
-TAG_MAP: dict[str, str] = {
-    "Assets": "total_assets",
-    "Liabilities": "total_liabilities",
-    "AssetsCurrent": "current_assets",
-    "LiabilitiesCurrent": "current_liabilities",
-    "LongTermDebt": "long_term_debt",
-    "LongTermDebtNoncurrent": "long_term_debt",
-    "CommonStockSharesOutstanding": "shares_outstanding",
-    "WeightedAverageNumberOfSharesOutstandingBasic": "shares_outstanding",
-    "GrossProfit": "gross_profit",
-    "NetIncomeLoss": "net_income",
-    "OperatingIncomeLoss": "ebit",
-    "Revenues": "revenue",
-    "RevenueFromContractWithCustomerExcludingAssessedTax": "revenue",
-    "SalesRevenueNet": "revenue",
-    "NetCashProvidedByUsedInOperatingActivities": "operating_cashflow",
-    "PaymentsOfDividends": "dividends_paid",
-    "PaymentsOfDividendsCommonStock": "dividends_paid",
-    "PaymentsForRepurchaseOfCommonStock": "repurchase_of_stock",
-    "PaymentsForRepurchaseOfEquity": "repurchase_of_stock",
-    "RetainedEarningsAccumulatedDeficit": "retained_earnings",
-    "CashAndCashEquivalentsAtCarryingValue": "total_cash",
-    "CashCashEquivalentsAndShortTermInvestments": "total_cash",
-    "StockholdersEquity": "book_equity",
-    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": "book_equity",
-    "LongTermDebtAndCapitalLeaseObligations": "total_debt",
-    "LongTermDebtAndCapitalLeaseObligationsCurrent": "total_debt_current",
-    "LongTermDebtAndCapitalLeaseObligationsNoncurrent": "total_debt_noncurrent",
-}
-
 SESSION_HEADERS = {"User-Agent": SEC_USER_AGENT, "Accept-Encoding": "gzip, deflate"}
 
+# Kept for callers/tests that inspect the old tag map. Prefer FIELD_TAGS in
+# core.edgar_facts for new work.
+from core.edgar_facts import TAG_TO_FIELD as TAG_MAP  # noqa: E402
 
-def _sec_get(url: str, timeout: int = 120) -> requests.Response:
+
+def _sec_get(url: str, timeout: int = 120):
+    import requests
+
     resp = requests.get(url, headers=SESSION_HEADERS, timeout=timeout)
     resp.raise_for_status()
     return resp
-
-
-def _quarter_labels(start_year: int = 2009, start_quarter: int = 2, end_year: int = 2025) -> list[str]:
-    """SEC dataset labels like 2009q2 through 2025q4."""
-    labels: list[str] = []
-    for year in range(start_year, end_year + 1):
-        q_start = start_quarter if year == start_year else 1
-        for quarter in range(q_start, 5):
-            labels.append(f"{year}q{quarter}")
-    return labels
 
 
 def fetch_cik_ticker_map(force: bool = False) -> pd.DataFrame:
@@ -91,165 +67,116 @@ def fetch_cik_ticker_map(force: bool = False) -> pd.DataFrame:
     return df
 
 
-def _parse_submissions(sub_bytes: bytes) -> pd.DataFrame:
-    cols = [
-        "adsh",
-        "cik",
-        "name",
-        "sic",
-        "countryba",
-        "stprba",
-        "cityba",
-        "zipba",
-        "bas1",
-        "bas2",
-        "baph",
-        "countryma",
-        "stprma",
-        "cityma",
-        "zipma",
-        "mas1",
-        "mas2",
-        "countryinc",
-        "stprinc",
-        "ein",
-        "former",
-        "changed",
-        "afs",
-        "wksi",
-        "form",
-        "period",
-        "fy",
-        "fp",
-        "filed",
-        "accepted",
-        "prevrpt",
-        "detail",
-        "instance",
-        "nciks",
-        "aciks",
-    ]
-    df = pd.read_csv(io.BytesIO(sub_bytes), sep="\t", dtype=str, low_memory=False)
-    df = df[[c for c in cols if c in df.columns]]
-    df["cik"] = pd.to_numeric(df["cik"], errors="coerce").astype("Int64")
-    df["period"] = pd.to_datetime(df["period"], format="%Y%m%d", errors="coerce")
-    df["filed"] = pd.to_datetime(df["filed"], format="%Y%m%d", errors="coerce")
-    return df
-
-
-def _parse_numbers(num_bytes: bytes) -> pd.DataFrame:
-    usecols = ["adsh", "tag", "version", "ddate", "qtrs", "value", "uval"]
-    df = pd.read_csv(
-        io.BytesIO(num_bytes),
-        sep="\t",
-        usecols=lambda c: c in usecols,
-        dtype={"adsh": str, "tag": str, "version": str, "qtrs": str},
-        low_memory=False,
-    )
-    df["ddate"] = pd.to_datetime(df["ddate"], format="%Y%m%d", errors="coerce")
-    df["qtrs"] = pd.to_numeric(df["qtrs"], errors="coerce").astype("Int64")
-    if "value" in df.columns:
-        df["amount"] = pd.to_numeric(df["value"], errors="coerce")
-    else:
-        df["amount"] = pd.to_numeric(df.get("uval"), errors="coerce")
-    return df
-
-
-def _download_quarter_zip(label: str) -> bytes | None:
-    url = f"{SEC_DATASETS_URL}/{label}.zip"
-    try:
-        return _sec_get(url).content
-    except requests.HTTPError as exc:
-        if exc.response is not None and exc.response.status_code == 404:
-            logger.warning("SEC dataset not found: %s", label)
-            return None
-        raise
-
-
-def ingest_quarter(label: str, cik_map: pd.DataFrame) -> pd.DataFrame:
-    """Parse one quarterly SEC dataset into normalized fundamentals rows."""
-    content = _download_quarter_zip(label)
-    if content is None:
-        return pd.DataFrame()
-
-    with zipfile.ZipFile(io.BytesIO(content)) as zf:
-        sub_name = next((n for n in zf.namelist() if n.endswith("sub.txt")), None)
-        num_name = next((n for n in zf.namelist() if n.endswith("num.txt")), None)
-        if not sub_name or not num_name:
-            logger.warning("Missing sub/num in %s", label)
-            return pd.DataFrame()
-        sub = _parse_submissions(zf.read(sub_name))
-        num = _parse_numbers(zf.read(num_name))
-
-    # Keep 10-K (annual) and 10-Q (quarterly) filings.
-    sub = sub[sub["form"].isin(["10-K", "10-K/A", "10-Q", "10-Q/A"])].copy()
-    if sub.empty:
-        return pd.DataFrame()
-
-    num = num[num["tag"].isin(TAG_MAP.keys())].copy()
-    if num.empty:
-        return pd.DataFrame()
-
-    merged = num.merge(sub[["adsh", "cik", "period", "filed", "form"]], on="adsh", how="inner")
-    merged["field"] = merged["tag"].map(TAG_MAP)
-    merged = merged.dropna(subset=["field", "amount", "filed", "period"])
-
-    # Prefer quarterly rows (qtrs in 1,4) for point-in-time; annual fills gaps.
-    merged["is_quarterly"] = merged["qtrs"].isin([1, 4])
-    merged = merged.sort_values(
-        ["cik", "field", "period", "is_quarterly", "filed"],
-        ascending=[True, True, True, False, True],
-    )
-    merged = merged.drop_duplicates(subset=["cik", "field", "period"], keep="last")
-
-    ticker_map = cik_map.set_index("cik")["ticker"].to_dict()
-    merged["ticker"] = merged["cik"].map(ticker_map)
-    merged = merged.dropna(subset=["ticker"])
-    merged["ticker"] = merged["ticker"].astype(str).str.upper()
-
-    out = merged[
-        ["ticker", "cik", "field", "amount", "period", "filed", "form", "tag", "qtrs"]
-    ].copy()
-    out["dataset_quarter"] = label
-    return out
-
-
 def ingest_edgar(
     quarters: Iterable[str] | None = None,
     force: bool = False,
     max_quarters: int | None = None,
+    max_tickers: int | None = None,
 ) -> pd.DataFrame:
     """
-    Download and normalize SEC fundamentals into a point-in-time parquet store.
-    Values are keyed by filing date (when the market could observe them).
+    Ingest consolidated companyfacts for historical S&P 500 members.
+
+    ``quarters`` / ``max_quarters`` are accepted for CLI compatibility but the
+    companyfacts payload is a full history per CIK, so they only limit the
+    membership window used to choose tickers. ``max_tickers`` caps CIKs.
     """
+    del quarters  # history is per-CIK, not per FSDS quarter zip
     if EDGAR_FUNDAMENTALS_PATH.exists() and not force:
-        return pd.read_parquet(EDGAR_FUNDAMENTALS_PATH)
+        existing = pd.read_parquet(EDGAR_FUNDAMENTALS_PATH)
+        missing = COMPANYFACTS_REQUIRED_COLUMNS.difference(existing.columns)
+        if not missing:
+            return existing
+        logger.warning(
+            "Existing EDGAR store at %s is missing companyfacts columns %s; "
+            "refusing stale or FSDS-shaped parquet. Re-run ingest with --force.",
+            EDGAR_FUNDAMENTALS_PATH,
+            sorted(missing),
+        )
+        raise RuntimeError(
+            f"EDGAR fundamentals at {EDGAR_FUNDAMENTALS_PATH} are not companyfacts "
+            f"schema (missing {sorted(missing)}). Re-run `ingest --force` to rebuild."
+        )
 
     EDGAR_STORE.mkdir(parents=True, exist_ok=True)
     cik_map = fetch_cik_ticker_map(force=force)
-    labels = list(quarters) if quarters else _quarter_labels()
-    if max_quarters is not None:
-        labels = labels[:max_quarters]
 
+    tickers: list[str] = []
+    try:
+        from backtest.data.constituents import load_membership
+
+        membership = load_membership()
+        if max_quarters is not None and not membership.empty:
+            qends = sorted(membership["quarter_end"].unique())[:max_quarters]
+            membership = membership[membership["quarter_end"].isin(qends)]
+        tickers = sorted(membership["ticker"].astype(str).str.upper().unique().tolist())
+    except Exception as exc:
+        logger.warning("Membership unavailable (%s); falling back to CIK map", exc)
+        tickers = cik_map["ticker"].astype(str).str.upper().tolist()
+
+    if max_tickers is not None:
+        tickers = tickers[:max_tickers]
+
+    ticker_to_cik_map: dict[str, int] = {}
+    for _, row in cik_map.iterrows():
+        ticker_to_cik_map[str(row["ticker"]).upper()] = int(row["cik"])
+
+    ciks: list[tuple[str, int]] = []
+    for ticker in tickers:
+        cik = ticker_to_cik_map.get(ticker)
+        if cik is None:
+            resolved = ticker_to_cik(ticker)
+            if resolved is None:
+                logger.debug("No CIK for %s", ticker)
+                continue
+            cik = resolved
+        ciks.append((ticker, int(cik)))
+
+    cik_set = {c for _, c in ciks}
     frames: list[pd.DataFrame] = []
-    for i, label in enumerate(labels, start=1):
-        logger.info("Ingesting SEC quarter %s (%d/%d)", label, i, len(labels))
-        try:
-            frame = ingest_quarter(label, cik_map)
-            if not frame.empty:
-                frames.append(frame)
-        except Exception as exc:
-            logger.warning("Failed quarter %s: %s", label, exc)
+    if BULK_ZIP_PATH.exists():
+        logger.info("Parsing bulk companyfacts zip for %d CIKs", len(cik_set))
+        bulk = rows_from_bulk_zip(BULK_ZIP_PATH, cik_set)
+        if not bulk.empty:
+            frames.append(bulk)
+
+    missing = cik_set - set() if not frames else cik_set - set(frames[0]["cik"].unique().tolist()) if frames else cik_set
+    if frames and not frames[0].empty:
+        have = set(int(c) for c in frames[0]["cik"].unique())
+        missing = cik_set - have
+    else:
+        missing = cik_set
+
+    for i, (ticker, cik) in enumerate(ciks, start=1):
+        if cik not in missing:
+            continue
+        if i % 25 == 0:
+            logger.info("Companyfacts %d/%d (%s)", i, len(ciks), ticker)
+        payload = fetch_companyfacts(cik)
+        if not payload:
+            continue
+        frame = facts_to_rows(payload, cik)
+        if frame.empty:
+            continue
+        frames.append(frame)
 
     if not frames:
-        raise RuntimeError("No SEC fundamentals ingested")
+        raise RuntimeError("No SEC companyfacts ingested")
 
     df = pd.concat(frames, ignore_index=True)
-    df = df.sort_values(["ticker", "field", "period", "filed"])
-    df = df.drop_duplicates(subset=["ticker", "field", "period", "filed"], keep="last")
+    reverse = {cik: ticker for ticker, cik in ciks}
+    if "ticker" not in df.columns:
+        df["ticker"] = df["cik"].map(reverse)
+    else:
+        df["ticker"] = df["ticker"].fillna(df["cik"].map(reverse))
+    df["ticker"] = df["ticker"].astype(str).str.upper()
+    df = df.dropna(subset=["ticker"])
+    df = df.sort_values(["ticker", "field", "end", "filed"])
+    df = df.drop_duplicates(
+        subset=["ticker", "field", "tag", "start", "end", "filed"],
+        keep="last",
+    )
     df.to_parquet(EDGAR_FUNDAMENTALS_PATH, index=False)
-    logger.info("Saved %d fundamentals rows to %s", len(df), EDGAR_FUNDAMENTALS_PATH)
+    logger.info("Saved %d companyfacts rows to %s", len(df), EDGAR_FUNDAMENTALS_PATH)
     return df
 
 
@@ -262,41 +189,6 @@ def load_fundamentals() -> pd.DataFrame:
 
 
 def fundamentals_as_of(as_of: date, ticker: str, fundamentals: pd.DataFrame) -> dict[str, float]:
-    """
-    Return latest known fundamental field values filed on or before as_of.
-    Also returns prior-year values where available for YoY factors.
-    """
-    as_of_ts = pd.Timestamp(as_of)
-    sub = fundamentals[
-        (fundamentals["ticker"] == ticker.upper())
-        & (fundamentals["filed"] <= as_of_ts)
-    ].copy()
-    if sub.empty:
-        return {}
-
-    latest_by_field: dict[str, tuple[pd.Timestamp, float]] = {}
-    for field, grp in sub.groupby("field"):
-        row = grp.sort_values(["period", "filed"]).iloc[-1]
-        latest_by_field[field] = (row["period"], float(row["amount"]))
-
-    out: dict[str, float] = {}
-    for field, (period, amount) in latest_by_field.items():
-        out[field] = amount
-        prior = sub[
-            (sub["field"] == field)
-            & (sub["period"] < period)
-        ].sort_values(["period", "filed"])
-        if not prior.empty:
-            out[f"{field}_prior"] = float(prior.iloc[-1]["amount"])
-
-    # Derived fields
-    if "book_equity" in out and "shares_outstanding" in out and out["shares_outstanding"]:
-        out["book_value"] = out["book_equity"] / out["shares_outstanding"]
-    if "total_debt_noncurrent" in out or "total_debt_current" in out:
-        out["total_debt"] = (out.get("total_debt_noncurrent") or 0.0) + (
-            out.get("total_debt_current") or 0.0
-        )
-    elif "long_term_debt" in out:
-        out["total_debt"] = out["long_term_debt"]
-
-    return out
+    """Latest TTM/MRQ field values filed on or before ``as_of`` (flat dict)."""
+    structured = fundamentals_as_of_structured(as_of, fundamentals, ticker=ticker)
+    return flatten_fundamentals(structured)

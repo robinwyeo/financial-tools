@@ -254,6 +254,66 @@ def fetch_ticker_info(ticker: str) -> dict[str, Any]:
         return {}
 
 
+def currency_symbol(currency: str | None) -> str:
+    """Display symbol for a listing currency (C$ distinguishes CAD from USD)."""
+    cur = (currency or "USD").upper()
+    if cur == "CAD":
+        return "C$"
+    if cur == "USD":
+        return "$"
+    return f"{cur} "
+
+
+def listing_amount(raw: dict[str, Any], key: str) -> Any:
+    """Prefer the listing-currency copy of a market field, else the working value."""
+    listing_key = f"{key}_listing"
+    if listing_key in raw and raw[listing_key] is not None:
+        return raw[listing_key]
+    return raw.get(key)
+
+
+def fetch_fx_rate(pair: str) -> float | None:
+    """
+    Spot FX for a 6-letter pair like CADUSD (units of quote per 1 unit of base).
+
+    Cached 24h. Tries Yahoo ``{pair}=X`` then the inverse pair.
+    """
+    raw = (pair or "").upper().replace("=", "").replace("X", "")
+    if len(raw) != 6 or not raw.isalpha():
+        return None
+    base, quote = raw[:3], raw[3:]
+    if base == quote:
+        return 1.0
+
+    cache_path = _cache_key("fx", base, quote)
+    cached = _read_cache(cache_path, max_age_hours=24)
+    if cached is not None:
+        rate = _safe_float(cached.get("rate"))
+        if rate is not None and rate > 0:
+            return rate
+
+    def _last_close(symbol: str) -> float | None:
+        try:
+            hist = yf.Ticker(symbol).history(period="5d")
+        except Exception as exc:
+            logger.debug("FX history failed for %s: %s", symbol, exc)
+            return None
+        if hist is None or hist.empty or "Close" not in hist.columns:
+            return None
+        return _safe_float(hist["Close"].dropna().iloc[-1] if not hist["Close"].dropna().empty else None)
+
+    rate = _last_close(f"{base}{quote}=X")
+    if rate is None or rate <= 0:
+        inv = _last_close(f"{quote}{base}=X")
+        if inv is not None and inv > 0:
+            rate = 1.0 / inv
+    if rate is None or rate <= 0:
+        logger.warning("FX rate unavailable for %s%s", base, quote)
+        return None
+    _write_cache(cache_path, {"rate": rate, "pair": f"{base}{quote}"})
+    return rate
+
+
 def _records_to_df(records: list[dict]) -> pd.DataFrame:
     """Restore a financial DataFrame from cached records, preserving the metric-name index."""
     if not records:
@@ -266,7 +326,7 @@ def _records_to_df(records: list[dict]) -> pd.DataFrame:
 
 
 def fetch_financials(ticker: str) -> dict[str, pd.DataFrame]:
-    """Fetch income statement, balance sheet, cash flow."""
+    """Fetch annual income statement, balance sheet, cash flow."""
     cache_path = _cache_key("fin", ticker.upper())
     cached = _read_cache(cache_path, max_age_hours=48)
     if cached is not None:
@@ -288,6 +348,46 @@ def fetch_financials(ticker: str) -> dict[str, pd.DataFrame]:
     except Exception as exc:
         logger.warning("Financials failed for %s: %s", ticker, exc)
         return {"income": pd.DataFrame(), "balance": pd.DataFrame(), "cashflow": pd.DataFrame()}
+
+
+def fetch_ttm_financials(ticker: str) -> dict[str, pd.DataFrame]:
+    """TTM income/cashflow plus most-recent quarterly balance sheet (cached 48h)."""
+    cache_path = _cache_key("ttmfin", ticker.upper())
+    cached = _read_cache(cache_path, max_age_hours=48)
+    if cached is not None:
+        return {k: _records_to_df(v) for k, v in cached.items()}
+
+    empty = {"income": pd.DataFrame(), "cashflow": pd.DataFrame(), "balance": pd.DataFrame()}
+    try:
+        t = yf.Ticker(ticker)
+        income = getattr(t, "ttm_income_stmt", None)
+        cashflow = getattr(t, "ttm_cashflow", None)
+        balance = getattr(t, "quarterly_balance_sheet", None)
+        if not isinstance(income, pd.DataFrame):
+            income = pd.DataFrame()
+        if not isinstance(cashflow, pd.DataFrame):
+            cashflow = pd.DataFrame()
+        if not isinstance(balance, pd.DataFrame):
+            balance = pd.DataFrame()
+        _write_cache(
+            cache_path,
+            {
+                "income": _df_to_records(income),
+                "cashflow": _df_to_records(cashflow),
+                "balance": _df_to_records(balance),
+            },
+        )
+        return {"income": income, "cashflow": cashflow, "balance": balance}
+    except Exception as exc:
+        logger.warning("TTM financials failed for %s: %s", ticker, exc)
+        return empty
+
+
+def _statement_period_end(df: pd.DataFrame) -> str | None:
+    cols = _financial_columns_newest_first(df)
+    if not cols:
+        return None
+    return str(cols[0])
 
 
 def _df_to_records(df: pd.DataFrame | None) -> list[dict]:
@@ -537,12 +637,69 @@ def build_fund_raw_metrics(ticker: str) -> dict[str, Any]:
     }
 
 
+_FLOW_REVENUE = ["Total Revenue", "Operating Revenue"]
+_FLOW_GROSS = ["Gross Profit"]
+_FLOW_NI = ["Net Income", "Net Income Common Stockholders"]
+_FLOW_EBIT = ["EBIT", "Operating Income"]
+_FLOW_OI = ["Operating Income"]
+_FLOW_OCF = ["Operating Cash Flow"]
+_FLOW_FCF = ["Free Cash Flow"]
+_FLOW_CAPEX = ["Capital Expenditure", "Capital Expenditures"]
+_FLOW_SBC = ["Stock Based Compensation", "Share Based Compensation"]
+_FLOW_INTEREST = ["Interest Expense", "Interest Expense Non Operating"]
+_FLOW_TAX = ["Tax Provision", "Income Tax Expense"]
+_FLOW_PRETAX = ["Pretax Income"]
+_FLOW_DA = ["Reconciled Depreciation", "Depreciation And Amortization"]
+_FLOW_DIV = [
+    "Cash Dividends Paid",
+    "Common Stock Dividend Paid",
+    "Payment Of Dividends",
+    "Dividends Paid",
+]
+_FLOW_BUYBACK = [
+    "Repurchase Of Capital Stock",
+    "Common Stock Payments",
+    "Repurchase Of Common Stock",
+    "Repurchase Of Stock",
+]
+_BS_ASSETS = ["Total Assets"]
+_BS_LIAB = ["Total Liabilities Net Minority Interest", "Total Liabilities"]
+_BS_CA = ["Current Assets"]
+_BS_CL = ["Current Liabilities"]
+_BS_LTD = ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"]
+_BS_STD = [
+    "Current Debt",
+    "Current Debt And Capital Lease Obligation",
+    "Short Long Term Debt",
+]
+_BS_DEBT = ["Total Debt"]
+_BS_CASH = [
+    "Cash Cash Equivalents And Short Term Investments",
+    "Cash And Cash Equivalents",
+    "Cash",
+]
+_BS_EQUITY = ["Stockholders Equity", "Common Stock Equity"]
+_BS_RE = [
+    "Retained Earnings",
+    "Retained Earnings Total Equity",
+    "Retained Earnings Accumulated Deficit",
+]
+_BS_SHARES = ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"]
+_BS_PPE = ["Net PPE", "Net Property Plant And Equipment"]
+_BS_GW = ["Goodwill"]
+
+
 def build_raw_metrics(ticker: str) -> dict[str, Any]:
     """
     Assemble raw inputs needed for factor computation for a single ticker.
+
+    Flows (income/cashflow) use TTM statements with annual fallback.
+    Balance-sheet items use the most recent quarterly sheet with annual fallback.
+    Book equity is the statement equity line, never Yahoo BVPS × shares.
     """
     info = fetch_ticker_info(ticker)
     fin = fetch_financials(ticker)
+    ttm = fetch_ttm_financials(ticker)
     hist = fetch_price_history(ticker, period="2y")
     recs = fetch_analyst_recommendations(ticker)
     from core.estimates import fetch_estimate_tables
@@ -559,87 +716,214 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
     if price is None and not hist.empty and "Close" in hist.columns:
         price = _safe_float(hist["Close"].iloc[-1])
     market_cap = _safe_float(info.get("marketCap"))
-    enterprise_value = _safe_float(info.get("enterpriseValue"))
-    book_value = _safe_float(info.get("bookValue"))
-    shares = _safe_float(info.get("sharesOutstanding"))
+    yahoo_ev = _safe_float(info.get("enterpriseValue"))
+    yahoo_book_value = _safe_float(info.get("bookValue"))
+    yahoo_shares = _safe_float(info.get("sharesOutstanding"))
 
-    income = fin["income"]
-    balance = fin["balance"]
-    cashflow = fin["cashflow"]
+    annual_income = fin.get("income", pd.DataFrame())
+    annual_balance = fin.get("balance", pd.DataFrame())
+    annual_cashflow = fin.get("cashflow", pd.DataFrame())
+    ttm_income = ttm.get("income", pd.DataFrame())
+    ttm_cashflow = ttm.get("cashflow", pd.DataFrame())
+    mrq_balance = ttm.get("balance", pd.DataFrame())
     data_warnings: list[str] = []
 
-    def _fin(col_names: list[str], df: pd.DataFrame) -> tuple[float | None, float | None]:
-        latest, prior, warns = extract_financial_values(col_names, df)
+    def _latest(names: list[str], df: pd.DataFrame) -> float | None:
+        latest, _, warns = extract_financial_values(names, df)
+        data_warnings.extend(warns)
+        return latest
+
+    def _annual_pair(names: list[str], df: pd.DataFrame) -> tuple[float | None, float | None]:
+        latest, prior, warns = extract_financial_values(names, df)
         data_warnings.extend(warns)
         return latest, prior
 
-    (total_assets, total_assets_prior) = _fin(["Total Assets"], balance)
-    (total_liabilities, total_liabilities_prior) = _fin(
-        ["Total Liabilities Net Minority Interest", "Total Liabilities"], balance
-    )
-    (current_assets, current_assets_prior) = _fin(["Current Assets"], balance)
-    (current_liabilities, current_liabilities_prior) = _fin(["Current Liabilities"], balance)
-    (long_term_debt, long_term_debt_prior) = _fin(
-        ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], balance
-    )
-    (_, shares_prior) = _fin(["Ordinary Shares Number", "Share Issued"], balance)
+    used_ttm_flow = False
 
-    (gross_profit, gross_profit_prior) = _fin(["Gross Profit"], income)
-    (net_income, net_income_prior) = _fin(["Net Income", "Net Income Common Stockholders"], income)
-    (ebit, _) = _fin(["EBIT", "Operating Income"], income)
-    (revenue, revenue_prior) = _fin(["Total Revenue", "Operating Revenue"], income)
-    (operating_income, _) = _fin(["Operating Income"], income)
+    def _flow(names: list[str], ttm_df: pd.DataFrame, ann_df: pd.DataFrame) -> float | None:
+        nonlocal used_ttm_flow
+        val = _latest(names, ttm_df)
+        if val is not None:
+            used_ttm_flow = True
+            return val
+        return _latest(names, ann_df)
 
-    (operating_cashflow, _) = _fin(["Operating Cash Flow"], cashflow)
-    (free_cashflow, _) = _fin(["Free Cash Flow"], cashflow)
-    (dividends_paid, _) = _fin(
-        ["Cash Dividends Paid", "Common Stock Dividend Paid", "Payment Of Dividends", "Dividends Paid"],
-        cashflow,
-    )
-    (repurchase_of_stock, _) = _fin(
-        [
-            "Repurchase Of Capital Stock",
-            "Common Stock Payments",
-            "Repurchase Of Common Stock",
-            "Repurchase Of Stock",
-        ],
-        cashflow,
-    )
+    used_mrq = False
 
-    (retained_earnings, _) = _fin(
-        ["Retained Earnings", "Retained Earnings Total Equity", "Retained Earnings Accumulated Deficit"],
-        balance,
-    )
+    def _bs(names: list[str]) -> float | None:
+        nonlocal used_mrq
+        val = _latest(names, mrq_balance)
+        if val is not None:
+            used_mrq = True
+            return val
+        return _latest(names, annual_balance)
 
-    # Price-based metrics
+    revenue = _flow(_FLOW_REVENUE, ttm_income, annual_income)
+    gross_profit = _flow(_FLOW_GROSS, ttm_income, annual_income)
+    net_income = _flow(_FLOW_NI, ttm_income, annual_income)
+    ebit = _flow(_FLOW_EBIT, ttm_income, annual_income)
+    operating_income = _flow(_FLOW_OI, ttm_income, annual_income)
+    interest_expense = _flow(_FLOW_INTEREST, ttm_income, annual_income)
+    tax_expense = _flow(_FLOW_TAX, ttm_income, annual_income)
+    pretax_income = _flow(_FLOW_PRETAX, ttm_income, annual_income)
+    depreciation = _flow(_FLOW_DA, ttm_income, annual_income)
+    sbc = _flow(_FLOW_SBC, ttm_income, annual_income)
+    operating_cashflow = _flow(_FLOW_OCF, ttm_cashflow, annual_cashflow)
+    free_cashflow = _flow(_FLOW_FCF, ttm_cashflow, annual_cashflow)
+    capex = _flow(_FLOW_CAPEX, ttm_cashflow, annual_cashflow)
+    dividends_paid = _flow(_FLOW_DIV, ttm_cashflow, annual_cashflow)
+    repurchase_of_stock = _flow(_FLOW_BUYBACK, ttm_cashflow, annual_cashflow)
+
+    if interest_expense is not None and interest_expense < 0:
+        interest_expense = abs(interest_expense)
+    if free_cashflow is None and operating_cashflow is not None and capex is not None:
+        free_cashflow = operating_cashflow - abs(capex)
+
+    _, revenue_prior = _annual_pair(_FLOW_REVENUE, annual_income)
+    _, gross_profit_prior = _annual_pair(_FLOW_GROSS, annual_income)
+    _, net_income_prior = _annual_pair(_FLOW_NI, annual_income)
+    total_assets_fy, total_assets_prior = _annual_pair(_BS_ASSETS, annual_balance)
+    _, total_liabilities_prior = _annual_pair(_BS_LIAB, annual_balance)
+    _, current_assets_prior = _annual_pair(_BS_CA, annual_balance)
+    _, current_liabilities_prior = _annual_pair(_BS_CL, annual_balance)
+    long_term_debt_fy, long_term_debt_prior = _annual_pair(_BS_LTD, annual_balance)
+    _, shares_prior = _annual_pair(_BS_SHARES, annual_balance)
+
+    total_assets = _bs(_BS_ASSETS)
+    if total_assets is None:
+        total_assets = total_assets_fy
+    total_liabilities = _bs(_BS_LIAB)
+    current_assets = _bs(_BS_CA)
+    current_liabilities = _bs(_BS_CL)
+    long_term_debt = _bs(_BS_LTD)
+    if long_term_debt is None:
+        long_term_debt = long_term_debt_fy
+    short_term_debt = _bs(_BS_STD)
+    retained_earnings = _bs(_BS_RE)
+    book_equity = _bs(_BS_EQUITY)
+    ppe_net = _bs(_BS_PPE)
+    goodwill = _bs(_BS_GW)
+    shares = _bs(_BS_SHARES)
+    if shares is None:
+        shares = yahoo_shares
+    # Dual-class share-basis reconciliation. Statement/EDGAR share rows sometimes
+    # report a single class (e.g. Berkshire Class A) whose count is inconsistent
+    # with the listing price and per-share earnings. market_cap / price is the
+    # share count on the same basis as `price` and `trailing_eps`, so per-share
+    # metrics (Graham, BVPS) must use it when the statement figure is materially
+    # smaller; otherwise BVPS is inflated by orders of magnitude.
+    implied_shares = None
+    if market_cap is not None and price is not None and price > 0:
+        implied_shares = market_cap / price
+    if (
+        implied_shares is not None
+        and implied_shares > 0
+        and (shares is None or shares <= 0 or implied_shares / shares > 1.5)
+    ):
+        if shares is not None and shares > 0:
+            data_warnings.append(
+                {
+                    "code": "SHARE_BASIS",
+                    "message": (
+                        f"shares_outstanding: statement {shares:.4g} inconsistent "
+                        f"with market cap / price {implied_shares:.4g}; using "
+                        f"market-basis shares for per-share metrics (dual-class)"
+                    ),
+                    "severity": "warning",
+                }
+            )
+        shares = implied_shares
+
+    total_debt = _bs(_BS_DEBT)
+    if total_debt is None and long_term_debt is not None and short_term_debt is not None:
+        total_debt = long_term_debt + short_term_debt
+    if total_debt is None:
+        total_debt = _safe_float(info.get("totalDebt"))
+
+    total_cash = _bs(_BS_CASH)
+    if total_cash is None:
+        total_cash = _safe_float(info.get("totalCash"))
+
+    # D/E from the balance sheet only — do not guess Yahoo percent vs ratio units.
+    debt_to_equity = None
+    if book_equity is not None and book_equity > 0 and total_debt is not None:
+        debt_to_equity = total_debt / book_equity
+
+    currency = (info.get("currency") or "USD").upper()
+    financial_currency = (info.get("financialCurrency") or currency).upper()
+    fx_to_financial = 1.0
+    price_listing = price
+    market_cap_listing = market_cap
+    if currency != financial_currency:
+        fx = fetch_fx_rate(f"{currency}{financial_currency}")
+        if fx is None or fx <= 0:
+            fx_to_financial = None
+            data_warnings.append(
+                {
+                    "code": "FX_MISSING",
+                    "message": (
+                        f"listing {currency} vs financials {financial_currency}; "
+                        "FX unavailable, ratios not converted"
+                    ),
+                    "severity": "error",
+                }
+            )
+        else:
+            fx_to_financial = fx
+
+            def _fx(val: float | None) -> float | None:
+                return None if val is None else val * fx
+
+            price = _fx(price)
+            market_cap = _fx(market_cap)
+            yahoo_ev = _fx(yahoo_ev)
+            data_warnings.append(
+                {
+                    "code": "FX_CONVERTED",
+                    "message": (
+                        f"converted {currency} price/market fields to {financial_currency} "
+                        f"at {fx:.4f}"
+                    ),
+                    "severity": "info",
+                }
+            )
+
+    enterprise_value = yahoo_ev
+    if enterprise_value is not None and enterprise_value <= 0:
+        data_warnings.append(
+            "EV unavailable: Yahoo enterpriseValue is not positive; discarding"
+        )
+        enterprise_value = None
+    if enterprise_value is None and market_cap is not None:
+        if total_debt is not None and total_cash is not None:
+            enterprise_value = market_cap + total_debt - total_cash
+        else:
+            data_warnings.append(
+                "EV unavailable: missing debt or cash; not zero-filling"
+            )
+    if enterprise_value is not None and enterprise_value <= 0:
+        data_warnings.append(
+            "EV unavailable: constructed enterprise value is not positive"
+        )
+        enterprise_value = None
+
     momentum_12_1 = _compute_momentum_12_1(hist)
     volatility_12m = _compute_volatility_12m(hist)
     drawdown_metrics = _compute_drawdown_metrics(hist)
     rsi_14 = _compute_rsi(hist)
     all_time_high = fetch_all_time_high(ticker)
 
-    # Valuation / balance-sheet fields from info (book-inspired metrics)
     trailing_pe = _safe_float(info.get("trailingPE"))
     trailing_eps = _safe_float(info.get("trailingEps"))
     earnings_growth = _safe_float(info.get("earningsGrowth"))
     dividend_yield = _safe_float(info.get("dividendYield"))
     trailing_peg_ratio = _safe_float(info.get("trailingPegRatio"))
-    total_cash = _safe_float(info.get("totalCash"))
-    total_debt = _safe_float(info.get("totalDebt"))
-    debt_to_equity = normalize_debt_to_equity(_safe_float(info.get("debtToEquity")))
     current_ratio_info = _safe_float(info.get("currentRatio"))
 
-    # Current earnings yield (EBIT/EV). Valuation-vs-history percentile is computed
-    # lazily in the bargain path (not during universe snapshot builds).
     current_ey = None
-    if ebit is not None:
-        ev_for_ey = enterprise_value
-        if ev_for_ey is None and market_cap is not None:
-            ev_for_ey = market_cap + (total_debt or 0.0) - (total_cash or 0.0)
-        if ev_for_ey is not None and ev_for_ey > 0:
-            current_ey = ebit / ev_for_ey
+    if ebit is not None and enterprise_value is not None and enterprise_value > 0:
+        current_ey = ebit / enterprise_value
 
-    # Analyst targets from info
     target_mean = _safe_float(info.get("targetMeanPrice"))
     target_low = _safe_float(info.get("targetLowPrice"))
     target_high = _safe_float(info.get("targetHighPrice"))
@@ -656,20 +940,48 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         if fifty_two_week_low is None and len(closes) > 0:
             window = closes.tail(min(252, len(closes)))
             fifty_two_week_low = _safe_float(window.min())
+    fifty_two_week_high_listing = fifty_two_week_high
+    fifty_two_week_low_listing = fifty_two_week_low
+    all_time_high_listing = all_time_high
+    target_mean_listing = target_mean
+    target_low_listing = target_low
+    target_high_listing = target_high
+    if fx_to_financial is not None and fx_to_financial != 1.0:
+        def _to_fin(val: float | None) -> float | None:
+            return None if val is None else val * fx_to_financial
+
+        fifty_two_week_high = _to_fin(fifty_two_week_high)
+        fifty_two_week_low = _to_fin(fifty_two_week_low)
+        all_time_high = _to_fin(all_time_high)
+        target_mean = _to_fin(target_mean)
+        target_low = _to_fin(target_low)
+        target_high = _to_fin(target_high)
     exchange = info.get("fullExchangeName") or info.get("exchange")
     sector = info.get("sector")
     industry = info.get("industry")
     name = info.get("longName") or info.get("shortName") or ticker.upper()
 
-    return {
+    statement_basis = {
+        "flows": "ttm" if used_ttm_flow else "annual",
+        "balance": "mrq" if used_mrq else "annual",
+        "flow_period_end": _statement_period_end(ttm_income if used_ttm_flow else annual_income),
+        "balance_period_end": _statement_period_end(mrq_balance if used_mrq else annual_balance),
+    }
+
+    out = {
         "ticker": ticker.upper(),
         "name": name,
         "sector": sector,
         "industry": industry,
         "price": price,
+        "price_listing": price_listing,
+        "price_fin": price,
         "market_cap": market_cap,
+        "market_cap_listing": market_cap_listing,
+        "market_cap_fin": market_cap,
         "enterprise_value": enterprise_value,
-        "book_value": book_value,
+        "book_value": yahoo_book_value,
+        "book_equity": book_equity,
         "shares_outstanding": shares,
         "total_assets": total_assets,
         "total_assets_prior": total_assets_prior,
@@ -681,6 +993,8 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "current_liabilities_prior": current_liabilities_prior,
         "long_term_debt": long_term_debt,
         "long_term_debt_prior": long_term_debt_prior,
+        "short_term_debt": short_term_debt,
+        "debt_st": short_term_debt,
         "shares_prior": shares_prior,
         "gross_profit": gross_profit,
         "gross_profit_prior": gross_profit_prior,
@@ -692,6 +1006,14 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "operating_income": operating_income,
         "operating_cashflow": operating_cashflow,
         "free_cashflow": free_cashflow,
+        "capex": capex,
+        "sbc": sbc,
+        "interest_expense": interest_expense,
+        "tax_expense": tax_expense,
+        "pretax_income": pretax_income,
+        "depreciation": depreciation,
+        "ppe_net": ppe_net,
+        "goodwill": goodwill,
         "dividends_paid": dividends_paid,
         "repurchase_of_stock": repurchase_of_stock,
         "retained_earnings": retained_earnings,
@@ -711,23 +1033,44 @@ def build_raw_metrics(ticker: str) -> dict[str, Any]:
         "target_mean": target_mean,
         "target_low": target_low,
         "target_high": target_high,
+        "target_mean_listing": target_mean_listing,
+        "target_low_listing": target_low_listing,
+        "target_high_listing": target_high_listing,
         "recommendation_key": recommendation_key,
         "num_analysts": num_analysts,
         "recommendations": recs,
         "price_history": hist,
         "fifty_two_week_high": fifty_two_week_high,
         "fifty_two_week_low": fifty_two_week_low,
+        "fifty_two_week_high_listing": fifty_two_week_high_listing,
+        "fifty_two_week_low_listing": fifty_two_week_low_listing,
         "all_time_high": all_time_high,
+        "all_time_high_listing": all_time_high_listing,
         "rsi_14": rsi_14,
         "earnings_yield_current": current_ey,
         "exchange": exchange,
+        "currency": currency,
+        "financial_currency": financial_currency,
+        "fx_to_financial": fx_to_financial,
         "estimate_tables": estimate_tables,
         "form4_transactions": form4_transactions,
         "short_ratio": _safe_float(info.get("shortRatio")),
         "short_percent_of_float": _safe_float(info.get("shortPercentOfFloat")),
         "shares_short": _safe_float(info.get("sharesShort")),
+        "statement_basis": statement_basis,
         "data_warnings": data_warnings,
+        "ticker": ticker.upper().strip(),
     }
+    from core.data_quality import attach_data_quality
+
+    attach_data_quality(out)
+    try:
+        from core.fundamentals import attach_history_metrics
+
+        attach_history_metrics(out)
+    except Exception as exc:
+        logger.debug("Fundamentals history skipped for %s: %s", ticker, exc)
+    return out
 
 
 def _compute_rsi(hist: pd.DataFrame, period: int = 14) -> float | None:
@@ -894,7 +1237,9 @@ def _ey_point(
         return None
     total_debt = _row_value_at(balance, _BALANCE_DEBT_ROWS, balance_col)
     total_cash = _row_value_at(balance, _BALANCE_CASH_ROWS, balance_col)
-    enterprise_value = price * shares + (total_debt or 0.0) - (total_cash or 0.0)
+    if total_debt is None or total_cash is None:
+        return None
+    enterprise_value = price * shares + total_debt - total_cash
     if enterprise_value <= 0:
         return None
     return float(annualized_ebit / enterprise_value)

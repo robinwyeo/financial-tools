@@ -136,10 +136,12 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
     Aggregate analyst recommendations, price targets, and implied upside.
     """
     info_key = raw.get("recommendation_key")
-    price = raw.get("price")
-    target_mean = raw.get("target_mean")
-    target_low = raw.get("target_low")
-    target_high = raw.get("target_high")
+    from core.data import listing_amount
+
+    price = listing_amount(raw, "price")
+    target_mean = listing_amount(raw, "target_mean")
+    target_low = listing_amount(raw, "target_low")
+    target_high = listing_amount(raw, "target_high")
     num_analysts = raw.get("num_analysts")
     recs: pd.DataFrame = raw.get("recommendations", pd.DataFrame())
 
@@ -222,6 +224,8 @@ def aggregate_analyst_data(raw: dict[str, Any]) -> dict[str, Any]:
                     row = current_rows.iloc[0]
             mean_rating = _weighted_mean_from_buckets(_bucket_counts(row, col_map))
 
+    if mean_rating is None and info_key and (recs is None or recs.empty):
+        mean_rating = _rating_to_score(info_key)
     if mean_rating is None and total > 0:
         mean_rating = (buy_count * 4.5 + hold_count * 3.0 + sell_count * 1.5) / total
     elif mean_rating is None and info_key:

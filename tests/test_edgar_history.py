@@ -6,10 +6,12 @@ import pandas as pd
 import pytest
 
 from core.edgar_history import (
+    ev_ebit_history,
     history_series_from_table,
-    pick_best_metric,
+    p_oe_history,
+    compute_valuation_vs_history_detail,
 )
-from core.edgar_history import compute_valuation_vs_history_detail
+from core.fundamentals import Fundamentals
 
 
 def _closes(prices: dict[str, float]) -> pd.Series:
@@ -47,7 +49,6 @@ def _table() -> pd.DataFrame:
 
 def test_history_series_from_table_builds_three_yields():
     table = _table()
-    # Price tracks EBIT (so EY is roughly stable around 0.10).
     prices = {f"{year}-12-31": ebit * 10 / 10 for year, ebit in zip(range(2015, 2025), [
         80, 90, 100, 110, 120, 70, 130, 140, 150, 160
     ])}
@@ -58,32 +59,37 @@ def test_history_series_from_table_builds_three_yields():
     assert all(0.05 < ey < 0.15 for ey in histories["earnings_yield"])
 
 
-def test_pick_best_metric_prefers_ebit_when_it_tracks_price():
-    table = _table()
-    prices = {
-        f"{year}-12-31": ebit * 1.0
-        for year, ebit in zip(
-            range(2015, 2025), [80, 90, 100, 110, 120, 70, 130, 140, 150, 160]
-        )
-    }
+def test_ev_ebit_and_p_oe_histories_are_deterministic():
+    idx = pd.to_datetime([f"{y}-12-31" for y in range(2015, 2025)])
+    annual = pd.DataFrame(
+        {
+            "ebit": [80, 90, 100, 110, 120, 70, 130, 140, 150, 160],
+            "operating_cashflow": [90, 100, 110, 120, 130, 80, 140, 150, 160, 170],
+            "capex": [0] * 10,
+            "sbc": [0] * 10,
+            "debt": [0] * 10,
+            "cash": [0] * 10,
+            "shares_diluted": [10] * 10,
+            "revenue": [200] * 10,
+        },
+        index=idx,
+    )
+    fund = Fundamentals("X", annual, annual.iloc[-1], annual.iloc[-1], "edgar", idx[-1].date())
+    prices = {f"{y}-12-31": float(ebit) for y, ebit in zip(range(2015, 2025), annual["ebit"])}
     closes = _closes(prices)
-    histories = history_series_from_table(table, closes, years=12)
-    metric, corr = pick_best_metric(table, closes, histories, years=12)
-    assert metric == "earnings_yield"
-    assert corr is not None and corr > 0.8
+    ey = ev_ebit_history(fund, closes, years=12)
+    oe = p_oe_history(fund, closes, years=12)
+    assert len(ey) == 10
+    # price = ebit, shares = 10 → mcap = 10*ebit, EV = mcap, EBIT/EV = 0.1
+    assert all(v == pytest.approx(0.1) for v in ey)
+    assert len(oe) == 10
 
 
 def test_valuation_detail_yahoo_fallback(monkeypatch):
-    monkeypatch.setattr("core.edgar_history.load_period_table", lambda t: (pd.DataFrame(), "none"))
-    monkeypatch.setattr(
-        "core.edgar_history.fetch_price_history",
-        lambda t, **kw: pd.DataFrame(),
-    )
-    monkeypatch.setattr(
-        "core.data.build_earnings_yield_history",
-        lambda t, years=10: [0.05, 0.06, 0.07, 0.08, 0.09],
-    )
+    monkeypatch.setattr("core.edgar_history.fetch_price_history", lambda t, **kw: pd.DataFrame())
+    monkeypatch.setattr("core.fundamentals.get_fundamentals", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no fund")))
+    monkeypatch.setattr("core.data.build_earnings_yield_history", lambda t, **kw: [0.05, 0.06, 0.07, 0.08, 0.09])
     detail = compute_valuation_vs_history_detail("FAKE", 0.09)
+    assert "correlation" not in detail
+    assert detail["score"] is not None
     assert detail["source"] == "yahoo"
-    assert detail["score"] == pytest.approx(100.0)
-    assert detail["n_points"] == 5

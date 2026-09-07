@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = ROOT / "data"
 FUND_SNAPSHOT_PATH = DATA_DIR / "fund_universe_snapshot.parquet"
+FUND_SNAPSHOT_META_PATH = DATA_DIR / "fund_universe_snapshot.meta.json"
+
+
+class SnapshotIncompleteError(RuntimeError):
+    """Raised when too few funds succeeded; the parquet is left untouched."""
 
 # Metadata carried into the snapshot alongside factor columns.
 _FUND_META_COLUMNS = [
@@ -115,6 +121,7 @@ def build_fund_universe_snapshot(
     tickers: list[str] | None = None,
     max_tickers: int | None = None,
     throttle_seconds: float = 0.25,
+    min_success_ratio: float = 0.9,
 ) -> pd.DataFrame:
     """Build cross-sectional factor snapshot for the fund universe."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -123,11 +130,13 @@ def build_fund_universe_snapshot(
         universe = universe[:max_tickers]
 
     rows = []
+    failures: list[dict[str, str]] = []
     for i, ticker in enumerate(universe):
         try:
             raw = build_fund_raw_metrics(ticker)
             if raw.get("price") is None:
                 logger.warning("Skipping %s: no price data", ticker)
+                failures.append({"ticker": ticker, "error": "no price data"})
                 continue
             factors = compute_fund_factors(raw)
             row = {col: raw.get(col) for col in _FUND_META_COLUMNS}
@@ -138,13 +147,36 @@ def build_fund_universe_snapshot(
                 logger.info("Processed %d / %d funds", i + 1, len(universe))
         except Exception as exc:
             logger.warning("Skipping %s: %s", ticker, exc)
+            failures.append({"ticker": ticker, "error": str(exc)})
         throttle(throttle_seconds)
 
+    n = len(universe)
+    success_ratio = (len(rows) / n) if n else 0.0
+    if n and success_ratio < min_success_ratio:
+        raise SnapshotIncompleteError(
+            f"Fund snapshot incomplete: {len(rows)}/{n} succeeded "
+            f"({success_ratio:.0%} < {min_success_ratio:.0%}); parquet not written"
+        )
+
     df = pd.DataFrame(rows)
+    snapshot_date = datetime.now(timezone.utc).isoformat()
     if not df.empty:
-        df["snapshot_date"] = datetime.now(timezone.utc).isoformat()
+        df["snapshot_date"] = snapshot_date
         df.to_parquet(FUND_SNAPSHOT_PATH, index=False)
         logger.info("Saved fund universe snapshot with %d funds to %s", len(df), FUND_SNAPSHOT_PATH)
+    FUND_SNAPSHOT_META_PATH.write_text(
+        json.dumps(
+            {
+                "snapshot_date": snapshot_date,
+                "attempted": n,
+                "succeeded": len(rows),
+                "failed": len(failures),
+                "path": str(FUND_SNAPSHOT_PATH),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return df
 
 

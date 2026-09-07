@@ -142,3 +142,36 @@ def test_fetch_form4_negative_cache_expires_before_full_ttl(monkeypatch):
     out = fetch_form4_transactions("ABCL")
     assert out == []
     assert calls["index"] == 1
+
+
+def test_fetch_form4_success_path(monkeypatch):
+    monkeypatch.setattr("core.insiders._read_cache", lambda *a, **kw: None)
+    monkeypatch.setattr("core.insiders._write_cache", lambda *a, **kw: None)
+    monkeypatch.setattr("core.insiders.ticker_to_cik", lambda ticker: 1)
+    monkeypatch.setattr(
+        "core.insiders._recent_form4_accessions",
+        lambda cik, since: [{"accession": "0001", "document": "form4.xml", "filed": "2026-07-01"}],
+    )
+    monkeypatch.setattr(
+        "core.insiders.sec_get",
+        lambda url, timeout=30: SimpleNamespace(text=_FORM4),
+    )
+    rows = fetch_form4_transactions("AAPL")
+    assert len(rows) == 1
+    assert rows[0]["code"] == "P"
+    assert rows[0]["is_officer"] is True
+
+
+def test_10b5_1_purchase_excluded_from_cluster():
+    xml = _FORM4.replace(
+        "<transactionCoding><transactionCode>P</transactionCode></transactionCoding>",
+        '<transactionCoding footnoteId="F1"><transactionCode>P</transactionCode></transactionCoding>',
+    ).replace(
+        "</ownershipDocument>",
+        "<footnotes><footnote id='F1'>Sale under Rule 10b5-1 plan</footnote></footnotes></ownershipDocument>",
+    )
+    rows = parse_form4_xml(xml)
+    assert rows[0]["planned_10b5_1"] is True
+    out = compute_insider_factor({"market_cap": 1_000_000, "form4_transactions": rows})
+    assert out["insider_cluster_buy"] is False
+    assert out["insider_buyers_90d"] == 0

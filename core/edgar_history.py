@@ -41,54 +41,6 @@ _COMPANYFACTS_TAGS: dict[str, str] = {
 _FLOW_FIELDS = frozenset({"ebit", "operating_cashflow"})
 
 
-def _load_edgar_parquet() -> pd.DataFrame | None:
-    try:
-        from backtest.data.edgar import load_fundamentals
-
-        return load_fundamentals()
-    except Exception as exc:
-        logger.debug("EDGAR parquet unavailable: %s", exc)
-        return None
-
-
-def _latest_per_period(sub: pd.DataFrame, field: str, *, annual_only: bool) -> pd.DataFrame:
-    rows = sub[sub["field"] == field].copy()
-    if rows.empty:
-        return pd.DataFrame(columns=["period", "amount"])
-    if annual_only and "qtrs" in rows.columns:
-        qtrs = pd.to_numeric(rows["qtrs"], errors="coerce")
-        form = rows["form"].astype(str) if "form" in rows.columns else pd.Series("", index=rows.index)
-        rows = rows[(qtrs == 4) | form.str.contains("10-K", na=False)]
-    if rows.empty:
-        return pd.DataFrame(columns=["period", "amount"])
-    rows["period"] = pd.to_datetime(rows["period"], errors="coerce")
-    rows = rows.dropna(subset=["period", "amount"])
-    rows = rows.sort_values(["period", "filed"] if "filed" in rows.columns else ["period"])
-    latest = rows.groupby("period", as_index=False).last()
-    return latest[["period", "amount"]].rename(columns={"amount": field})
-
-
-def _period_table_from_parquet(fundamentals: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    sub = fundamentals[fundamentals["ticker"].astype(str).str.upper() == ticker.upper()].copy()
-    if sub.empty:
-        return pd.DataFrame()
-    frames = [
-        _latest_per_period(sub, "ebit", annual_only=True),
-        _latest_per_period(sub, "operating_cashflow", annual_only=True),
-        _latest_per_period(sub, "book_equity", annual_only=False),
-        _latest_per_period(sub, "shares_outstanding", annual_only=False),
-        _latest_per_period(sub, "total_debt", annual_only=False),
-        _latest_per_period(sub, "total_cash", annual_only=False),
-    ]
-    frames = [f for f in frames if not f.empty]
-    if not frames:
-        return pd.DataFrame()
-    out = frames[0]
-    for extra in frames[1:]:
-        out = out.merge(extra, on="period", how="outer")
-    return out.sort_values("period")
-
-
 def _companyfacts_entries(facts: dict[str, Any], tag: str) -> list[dict[str, Any]]:
     node = ((facts.get("facts") or {}).get("us-gaap") or {}).get(tag) or {}
     units = node.get("units") or {}
@@ -217,82 +169,81 @@ def history_series_from_table(
     return {"earnings_yield": ey, "ocf_yield": ocf_y, "book_to_market": btm}
 
 
-def _spearman(a: list[float], b: list[float]) -> float | None:
-    if len(a) < _MIN_POINTS_FOR_CORR or len(a) != len(b):
-        return None
-    sa = pd.Series(a)
-    sb = pd.Series(b)
-    if sa.nunique() < 3 or sb.nunique() < 3:
-        return None
-    corr = sa.rank().corr(sb.rank())
-    if corr is None or (isinstance(corr, float) and np.isnan(corr)):
-        return None
-    return float(corr)
-
-
-def _aligned_fundamental_and_price(
-    table: pd.DataFrame,
+def ev_ebit_history(
+    fund,
     closes: pd.Series,
-    field: str,
     *,
-    years: int,
-) -> tuple[list[float], list[float]]:
+    years: int = VALUATION_HISTORY_YEARS,
+) -> list[float]:
+    """Annual EBIT/EV yields (higher = cheaper)."""
+    from core.fundamentals import Fundamentals
+
+    if fund is None or getattr(fund, "annual", None) is None or fund.annual.empty:
+        return []
     cutoff = pd.Timestamp.now().normalize() - pd.DateOffset(years=years)
-    fund_vals: list[float] = []
-    prices: list[float] = []
-    for _, row in table.iterrows():
-        period = pd.to_datetime(row.get("period"), errors="coerce")
-        val = row.get(field)
-        if pd.isna(period) or period < cutoff or val is None or pd.isna(val):
+    out: list[float] = []
+    for period, row in fund.annual.iterrows():
+        ts = pd.Timestamp(period)
+        if ts < cutoff:
             continue
-        price = _price_on_or_before(closes, pd.Timestamp(period))
-        if price is None:
+        price = _price_on_or_before(closes, ts)
+        shares = row.get("shares_diluted")
+        ebit = row.get("ebit")
+        if price is None or shares is None or pd.isna(shares) or shares <= 0 or ebit is None or pd.isna(ebit):
             continue
-        fund_vals.append(float(val))
-        prices.append(price)
-    return fund_vals, prices
+        mcap = price * float(shares)
+        debt = float(row["debt"]) if pd.notna(row.get("debt")) else 0.0
+        cash = float(row["cash"]) if pd.notna(row.get("cash")) else 0.0
+        ev = mcap + debt - cash
+        if ev > 0:
+            out.append(float(ebit) / ev)
+    return out
 
 
-def pick_best_metric(
-    table: pd.DataFrame,
+def p_oe_history(
+    fund,
     closes: pd.Series,
-    histories: dict[str, list[float]],
     *,
-    years: int,
-) -> tuple[str | None, float | None]:
-    """
-    Pick the yield whose underlying fundamental best tracks the stock's price
-    (GuruFocus-style: use the historically most relevant multiple).
-    """
-    field_for_metric = {
-        "earnings_yield": "ebit",
-        "ocf_yield": "operating_cashflow",
-        "book_to_market": "book_equity",
-    }
-    best_metric: str | None = None
-    best_corr: float | None = None
-    for metric, field in field_for_metric.items():
-        if len(histories.get(metric) or []) < _MIN_POINTS:
+    years: int = VALUATION_HISTORY_YEARS,
+    subtract_sbc: bool = True,
+) -> list[float]:
+    """Annual owner-earnings yields (higher = cheaper)."""
+    from core.fundamentals import owner_earnings
+
+    if fund is None or getattr(fund, "annual", None) is None or fund.annual.empty:
+        return []
+    cutoff = pd.Timestamp.now().normalize() - pd.DateOffset(years=years)
+    out: list[float] = []
+    for period, row in fund.annual.iterrows():
+        ts = pd.Timestamp(period)
+        if ts < cutoff:
             continue
-        fund_vals, prices = _aligned_fundamental_and_price(table, closes, field, years=years)
-        corr = _spearman(fund_vals, prices)
-        if corr is None:
+        price = _price_on_or_before(closes, ts)
+        shares = row.get("shares_diluted")
+        oe = owner_earnings(row, subtract_sbc=subtract_sbc)
+        if price is None or shares is None or pd.isna(shares) or shares <= 0 or oe is None:
             continue
-        if best_corr is None or abs(corr) > abs(best_corr):
-            best_corr = corr
-            best_metric = metric
-    if best_corr is not None and abs(best_corr) < _MIN_ABS_CORR:
-        return None, best_corr
-    return best_metric, best_corr
+        mcap = price * float(shares)
+        if mcap > 0:
+            out.append(float(oe) / mcap)
+    return out
 
 
 def load_period_table(ticker: str) -> tuple[pd.DataFrame, str]:
-    """Prefer the ingested EDGAR parquet; fall back to per-ticker company facts."""
-    parquet = _load_edgar_parquet()
-    if parquet is not None and not parquet.empty:
-        table = _period_table_from_parquet(parquet, ticker)
+    """Always use consolidated companyfacts (same source live and backtest).
+
+    The old FSDS parquet mixed segments and YTD amounts; live scoring no longer
+    reads it even when the backtest store is present locally.
+    """
+    try:
+        from core.edgar_facts import fetch_companyfacts_for_ticker, period_table_from_facts
+
+        facts = fetch_companyfacts_for_ticker(ticker)
+        table = period_table_from_facts(facts, ticker)
         if not table.empty:
-            return table, "edgar_parquet"
+            return table, "companyfacts"
+    except Exception as exc:
+        logger.debug("edgar_facts period table failed for %s: %s", ticker, exc)
     table = _period_table_from_companyfacts(ticker)
     if not table.empty:
         return table, "companyfacts"
@@ -305,68 +256,64 @@ def compute_valuation_vs_history_detail(
     *,
     current_ocf_yield: float | None = None,
     current_book_to_market: float | None = None,
+    current_oe_yield: float | None = None,
     years: int = VALUATION_HISTORY_YEARS,
 ) -> dict[str, Any]:
-    """
-    Current cheapness vs the stock's own 10y EDGAR history (0-100).
-
-    Builds three yield histories (EBIT/EV, OCF/mcap, book/mcap) and scores the
-    current value against the metric whose fundamental has the strongest
-    historical rank-correlation with price. Falls back to an equal-weight
-    average of available percentiles, then to Yahoo EY history.
-    """
+    """EV/EBIT and P/OE cheapness vs own 10y history. score = mean of the two percentiles."""
+    del current_ocf_yield, current_book_to_market
     empty = {
         "score": None,
         "metric": None,
         "source": None,
         "n_points": 0,
-        "correlation": None,
         "years": years,
-        "percentiles": {},
+        "ev_ebit": {"current": None, "median_10y": None, "percentile": None, "n": 0},
+        "p_oe": {"current": None, "median_10y": None, "percentile": None, "n": 0},
     }
     ticker = ticker.upper().strip()
     hist = fetch_price_history(ticker, period="max")
     closes = _closes_index(hist)
-    table, source = load_period_table(ticker)
-    histories = history_series_from_table(table, closes, years=years) if not table.empty else {
-        "earnings_yield": [],
-        "ocf_yield": [],
-        "book_to_market": [],
-    }
+    fund = None
+    source = "none"
+    try:
+        from core.fundamentals import get_fundamentals
 
-    current = {
-        "earnings_yield": current_earnings_yield,
-        "ocf_yield": current_ocf_yield,
-        "book_to_market": current_book_to_market,
-    }
-    percentiles: dict[str, float] = {}
-    for metric, series in histories.items():
-        pct = percentile_rank_in_history(current.get(metric), series)
-        if pct is not None:
-            percentiles[metric] = pct
+        fund = get_fundamentals(ticker)
+        source = fund.source
+    except Exception as exc:
+        logger.debug("fundamentals for valuation history failed: %s", exc)
 
-    best_metric, best_corr = pick_best_metric(table, closes, histories, years=years)
-    score = None
-    metric_used = best_metric
-    if best_metric and best_metric in percentiles:
-        score = percentiles[best_metric]
-    elif percentiles:
-        score = float(np.mean(list(percentiles.values())))
-        metric_used = "average"
+    ey_hist = ev_ebit_history(fund, closes, years=years) if fund is not None else []
+    oe_hist = p_oe_history(fund, closes, years=years) if fund is not None else []
 
-    n_points = max((len(v) for v in histories.values()), default=0)
-    if score is not None:
+    def _block(current_yield: float | None, series: list[float]) -> dict[str, Any]:
+        pct = percentile_rank_in_history(current_yield, series)
+        median_yield = float(np.median(series)) if series else None
+        median_mult = (1.0 / median_yield) if median_yield else None
+        current_mult = (1.0 / current_yield) if current_yield else None
         return {
-            "score": float(score),
-            "metric": metric_used,
-            "source": source,
-            "n_points": int(n_points),
-            "correlation": best_corr,
-            "years": years,
-            "percentiles": percentiles,
+            "current": current_mult,
+            "median_10y": median_mult,
+            "percentile": pct,
+            "n": len(series),
         }
 
-    # Yahoo fallback: annualized EBIT/EV over whatever history Yahoo exposes.
+    ev_block = _block(current_earnings_yield, ey_hist)
+    poe_block = _block(current_oe_yield, oe_hist)
+    scores = [b["percentile"] for b in (ev_block, poe_block) if b["percentile"] is not None]
+    score = float(np.mean(scores)) if scores else None
+    n_points = max(len(ey_hist), len(oe_hist), 0)
+    if score is not None:
+        return {
+            "score": score,
+            "metric": "ev_ebit_p_oe",
+            "source": source,
+            "n_points": int(n_points),
+            "years": years,
+            "ev_ebit": ev_block,
+            "p_oe": poe_block,
+        }
+
     from core.data import build_earnings_yield_history
 
     yahoo = build_earnings_yield_history(ticker, years=years)
@@ -375,10 +322,11 @@ def compute_valuation_vs_history_detail(
         return empty
     return {
         "score": float(yahoo_score),
-        "metric": "earnings_yield",
+        "metric": "ev_ebit",
         "source": "yahoo",
         "n_points": len(yahoo),
-        "correlation": None,
         "years": years,
-        "percentiles": {"earnings_yield": float(yahoo_score)},
+        "ev_ebit": _block(current_earnings_yield, yahoo),
+        "p_oe": poe_block,
     }
+

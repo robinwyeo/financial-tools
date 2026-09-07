@@ -22,6 +22,7 @@ from backtest.engine import (
     BacktestResult,
     bootstrap_mean_ci,
     compute_horizon_ics,
+    dca_block_excess_roi,
     dca_fold_excess_roi,
     init_backtest_cache,
     make_expanding_window_folds,
@@ -33,6 +34,7 @@ from backtest.engine import (
     score_factor_panel,
     split_period,
 )
+from backtest.stats import gated_pick_horizon_stats, write_results_json
 from backtest.data.prices import load_delisted_catalog, load_prices
 from backtest.factors import load_factor_panel
 from backtest.weights import (
@@ -202,7 +204,8 @@ def tune_factor_weights(
         ],
         "n_samples": n_samples,
     }
-    TUNING_RESULTS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    TUNING_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    write_results_json(TUNING_RESULTS_PATH, payload)
     logger.info("Tuning complete; winner=%s", winner.name)
     return payload
 
@@ -352,7 +355,7 @@ def tune_factor_weights_cv(
         "n_samples": n_samples,
     }
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    CV_TUNING_RESULTS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_results_json(CV_TUNING_RESULTS_PATH, payload)
     logger.info("DCA-CV tuning complete; winner=%s", winner.name)
     return payload
 
@@ -437,6 +440,11 @@ def validate_bargain_weights(
     candidates = {
         "default_long_horizon": baseline,
         "graham_heavy": {"margin_of_safety": 0.55, "valuation_vs_history": 0.30, "discount_52w": 0.15},
+        "legacy_040_035_025": {
+            "margin_of_safety": 0.40,
+            "valuation_vs_history": 0.35,
+            "discount_52w": 0.25,
+        },
         "equal": {"margin_of_safety": 1 / 3, "valuation_vs_history": 1 / 3, "discount_52w": 1 / 3},
     }
 
@@ -471,7 +479,7 @@ def validate_bargain_weights(
     out_dir = results_dir if results_dir is not None else RESULTS_DIR
     path = out_dir / "bargain_tuning_results.json"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    write_results_json(path, out)
     return out
 
 
@@ -538,7 +546,7 @@ def compare_named_candidates(
                 continue
             fold_end = test_q[-1] if isinstance(test_q, list) else test_q
             test_list = test_q if isinstance(test_q, list) else [test_q]
-            ex = dca_fold_excess_roi(
+            ex = dca_block_excess_roi(
                 picks,
                 quarter_end_prices,
                 test_list,
@@ -549,17 +557,36 @@ def compare_named_candidates(
                 fold_excess.append(ex)
 
         ci = bootstrap_mean_ci(fold_excess)
+        ic_stats = horizon_ics.get("_stats") or {}
+        primary_stats = ic_stats.get(PRIMARY_EVAL_HORIZON) or {}
+        hit_3y = gated_pick_horizon_stats(picks, multi, "3y")
+        hit_5y = gated_pick_horizon_stats(picks, multi, "5y")
         rows.append(
             {
                 "name": name,
                 "factor_weights": weights,
-                "horizon_ics": horizon_ics,
+                "horizon_ics": {k: v for k, v in horizon_ics.items() if k != "_stats"},
+                "horizon_ic_stats": {
+                    h: {
+                        "mean": s.get("mean"),
+                        "nw_tstat": s.get("nw_tstat"),
+                        "n_quarters": s.get("n_quarters"),
+                        "n_independent_windows": s.get("n_independent_windows"),
+                    }
+                    for h, s in ic_stats.items()
+                },
                 "primary_ic": horizon_ics.get(PRIMARY_EVAL_HORIZON, 0.0),
-                "fold_excess_roi": fold_excess,
+                "nw_tstat": primary_stats.get("nw_tstat"),
+                "n_independent_windows": primary_stats.get("n_independent_windows"),
+                "fold_block_roi": fold_excess,
+                "fold_excess_roi": fold_excess,  # alias
                 "excess_mean": ci["mean"],
+                "block_roi_mean": ci["mean"],
                 "excess_ci_low": ci["ci_low"],
                 "excess_ci_high": ci["ci_high"],
                 "frac_folds_positive": float(np.mean([e > 0 for e in fold_excess])) if fold_excess else 0.0,
+                "pick_stats_3y": hit_3y,
+                "pick_stats_5y": hit_5y,
             }
         )
 
@@ -601,8 +628,8 @@ def compare_named_candidates(
         "comparisons": comparisons,
         "recommended": recommended,
         "recommended_weights": next(r["factor_weights"] for r in rows if r["name"] == recommended),
+        "block_roi_label": "block ROI (<= 2y), not 3-year excess",
     }
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    CANDIDATE_COMPARISON_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    write_results_json(CANDIDATE_COMPARISON_PATH, payload)
     logger.info("Candidate comparison complete; recommended=%s", recommended)
     return payload

@@ -10,6 +10,7 @@ import pandas as pd
 from core.analysts import aggregate_analyst_data
 from core.config import (
     get_bargain_weights,
+    get_decision_config,
     get_factor_weights,
     get_fund_factor_weights,
     get_thresholds,
@@ -21,6 +22,7 @@ from core.data import (
     get_security_type,
     is_etf,
     is_fund,
+    listing_amount,
 )
 from core.edgar_history import compute_valuation_vs_history_detail
 from core.estimates import compute_revision_factors
@@ -33,8 +35,9 @@ from core.universe import load_universe_snapshot, snapshot_path
 from core.watchlist import load_watchlist
 
 # Long-horizon valuation bargain weights (RSI removed; kept as informational only).
-# graham_heavy candidate: roughly doubles 3y/5y rank IC vs the old 0.40/0.35/0.25
-# default in backtest/results/bargain_tuning_results.json (0.016/0.022 vs 0.008/0.012).
+# graham_heavy (0.55/0.30/0.15) is the live default. The old 0.40/0.35/0.25 mix is
+# registered as bargain candidate `legacy_040_035_025` for an apples-to-apples
+# comparison on the clean companyfacts panel. Do not cite pre-fix IC numbers.
 BARGAIN_COMPONENT_WEIGHTS: dict[str, float] = {
     "margin_of_safety": 0.55,
     "valuation_vs_history": 0.30,
@@ -304,27 +307,100 @@ def _composite_and_coverage(
     weights: dict[str, float],
     factor_columns: dict[str, list[str]] | None = None,
 ) -> tuple[float | None, float]:
-    """Weighted composite using only groups with data; returns (composite, coverage_pct)."""
+    """Weighted composite; coverage is weight × fraction of sub-signals present."""
     families = factor_columns if factor_columns is not None else FACTOR_SCORE_COLUMNS
     weighted_sum = 0.0
     weight_available = 0.0
+    coverage_weight = 0.0
     weight_total = sum(weights.get(family, 0) for family in families)
 
     for family in families:
-        pct_col = f"pct_{family}"
-        if pct_col not in row.index:
-            continue
-        pct = row[pct_col]
         w = weights.get(family, 0)
+        pct_col = f"pct_{family}"
+        pct = row[pct_col] if pct_col in row.index else None
         if pct is not None and not (isinstance(pct, float) and np.isnan(pct)):
             weighted_sum += float(pct) * w
             weight_available += w
+
+        cols = list(families.get(family, []))
+        if cols and any(c in row.index for c in cols):
+            present = 0
+            for c in cols:
+                val = row[c] if c in row.index else None
+                if _is_meaningful_value(val, column=c):
+                    present += 1
+            frac = present / len(cols)
+        else:
+            frac = 1.0 if pct is not None and not (isinstance(pct, float) and np.isnan(pct)) else 0.0
+        coverage_weight += w * frac
 
     if weight_available == 0:
         return None, 0.0
 
     composite = weighted_sum / weight_available
-    coverage = (weight_available / weight_total * 100.0) if weight_total > 0 else 0.0
+    coverage = (coverage_weight / weight_total * 100.0) if weight_total > 0 else 0.0
+    return composite, coverage
+
+
+def _meaningful_mask(series: pd.Series, column: str) -> pd.Series:
+    """Vectorized counterpart of ``_is_meaningful_value``."""
+    if series is None:
+        return pd.Series(dtype=bool)
+    mask = series.notna()
+    if pd.api.types.is_numeric_dtype(series):
+        mask = mask & ~pd.isna(series)
+        if column in ZERO_NEUTRAL_COLUMNS:
+            mask = mask & (series != 0)
+        return mask
+    as_str = series.astype(str).str.strip()
+    mask = mask & ~as_str.str.lower().isin({"", "none", "nan", "unknown", "<na>"})
+    numeric = pd.to_numeric(series, errors="coerce")
+    if column in ZERO_NEUTRAL_COLUMNS:
+        mask = mask & (numeric.fillna(1) != 0)
+    return mask
+
+
+def _composite_and_coverage_frame(
+    df: pd.DataFrame,
+    weights: dict[str, float],
+    factor_columns: dict[str, list[str]] | None = None,
+) -> tuple[pd.Series, pd.Series]:
+    """Vectorized composite + coverage; matches ``_composite_and_coverage`` row-wise."""
+    families = factor_columns if factor_columns is not None else FACTOR_SCORE_COLUMNS
+    weighted_sum = pd.Series(0.0, index=df.index)
+    weight_available = pd.Series(0.0, index=df.index)
+    coverage_weight = pd.Series(0.0, index=df.index)
+    weight_total = sum(weights.get(family, 0) for family in families)
+
+    for family in families:
+        w = float(weights.get(family, 0) or 0.0)
+        pct_col = f"pct_{family}"
+        pct = None
+        has_pct = pd.Series(False, index=df.index)
+        if pct_col in df.columns:
+            pct = pd.to_numeric(df[pct_col], errors="coerce")
+            has_pct = pct.notna()
+            weighted_sum = weighted_sum + pct.fillna(0.0) * w
+            weight_available = weight_available + (w * has_pct.astype(float))
+
+        cols = list(families.get(family, []))
+        present_cols = [c for c in cols if c in df.columns]
+        if cols and present_cols:
+            present = pd.Series(0.0, index=df.index)
+            for c in cols:
+                if c in df.columns:
+                    present = present + _meaningful_mask(df[c], c).astype(float)
+            frac = present / float(len(cols))
+        else:
+            frac = has_pct.astype(float)
+        coverage_weight = coverage_weight + (w * frac)
+
+    composite = weighted_sum / weight_available.replace(0.0, np.nan)
+    coverage = (
+        coverage_weight / weight_total * 100.0
+        if weight_total > 0
+        else pd.Series(0.0, index=df.index)
+    )
     return composite, coverage
 
 
@@ -402,6 +478,100 @@ def _attach_live_signals(
     analysis["short_interest"] = short
     analysis["uncertainty"] = uncertainty
     analysis["volatility_12m"] = raw.get("volatility_12m")
+    return analysis
+
+
+def _attach_intrinsic_layers(
+    analysis: dict[str, Any],
+    raw: dict[str, Any],
+    cfg: dict[str, Any],
+    scored_row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach valuation, flags, quality percentile, and Decision. Never raises."""
+    from core.decision import decide
+    from core.fundamentals import get_fundamentals
+    from core.quality import flags_to_dicts, value_trap_flags
+    from core.valuation import valuation_summary
+
+    scored_row = scored_row or {}
+    analysis["quality_score"] = scored_row.get("quality_score", analysis.get("quality_score"))
+    analysis["quality_coverage_pct"] = scored_row.get(
+        "quality_coverage_pct", analysis.get("quality_coverage_pct")
+    )
+    analysis["quality_percentile"] = scored_row.get("quality_score", analysis.get("quality_score"))
+    analysis["ev_to_ebit"] = scored_row.get("ev_to_ebit", raw.get("ev_to_ebit"))
+    analysis["p_to_oe"] = scored_row.get("p_to_oe", raw.get("p_to_oe"))
+
+    fund = raw.get("_fundamentals")
+    if fund is None and get_decision_config(cfg).get("mode") != "legacy":
+        try:
+            fund = get_fundamentals(str(analysis.get("ticker") or raw.get("ticker") or ""))
+        except Exception:
+            fund = None
+
+    flags: list[dict[str, Any]] = []
+    try:
+        flags = flags_to_dicts(value_trap_flags(raw, fund, cfg))
+    except Exception:
+        flags = []
+    analysis["value_trap_flags"] = flags
+
+    valuation: dict[str, Any] = {}
+    if fund is not None:
+        try:
+            analyst = analysis.get("analyst") or {}
+            valuation = valuation_summary(
+                fund,
+                price=raw.get("price") or analysis.get("price"),
+                shares=raw.get("shares_outstanding") or raw.get("shares_diluted"),
+                cash=raw.get("total_cash"),
+                debt=raw.get("total_debt"),
+                market_cap=raw.get("market_cap"),
+                ev=raw.get("enterprise_value"),
+                sector=analysis.get("sector") or raw.get("sector"),
+                industry=analysis.get("industry") or raw.get("industry"),
+                uncertainty_label=(analysis.get("uncertainty") or {}).get("label"),
+                analyst_growth=raw.get("earnings_growth"),
+                config=cfg,
+            )
+        except Exception:
+            valuation = {}
+    analysis["valuation"] = valuation
+
+    # Extra uncertainty points: data-quality B, wide DCF spread.
+    try:
+        analysis["uncertainty"] = compute_uncertainty(
+            factor_coverage_pct=analysis.get("factor_coverage_pct"),
+            volatility_12m=analysis.get("volatility_12m"),
+            target_high=(analysis.get("analyst") or {}).get("target_high"),
+            target_low=(analysis.get("analyst") or {}).get("target_low"),
+            target_mean=(analysis.get("analyst") or {}).get("target_mean"),
+            thresholds=get_thresholds(cfg),
+            data_quality_grade=(analysis.get("data_quality") or {}).get("grade"),
+            dcf_base=(valuation.get("dcf") or {}).get("base", {}).get("per_share") if valuation.get("dcf") else None,
+            dcf_bear=(valuation.get("dcf") or {}).get("bear", {}).get("per_share") if valuation.get("dcf") else None,
+        )
+    except TypeError:
+        pass
+
+    try:
+        decision = decide(analysis, cfg)
+        analysis["decision"] = decision.to_dict()
+        if get_decision_config(cfg).get("mode") == "legacy":
+            analysis["is_good_buy"] = decision.label == "Accumulate"
+        else:
+            analysis["is_good_buy"] = decision.label == "Accumulate"
+    except Exception:
+        analysis["decision"] = {
+            "label": "Avoid",
+            "buy_below_price": None,
+            "pct_to_buy": None,
+            "gates": [],
+            "flags": flags,
+            "timing_context": {},
+            "mode": get_decision_config(cfg).get("mode"),
+        }
+        analysis["is_good_buy"] = False
     return analysis
 
 
@@ -485,14 +655,18 @@ def score_universe_df(
             buckets=FACTOR_SUB_BUCKETS.get(family),
         )
 
-    composites = []
-    coverages = []
-    for _, row in result.iterrows():
-        composite, coverage = _composite_and_coverage(row, weights, families)
-        composites.append(composite)
-        coverages.append(coverage)
-    result["composite"] = composites
-    result["factor_coverage_pct"] = coverages
+    composite, coverage = _composite_and_coverage_frame(result, weights, families)
+    result["composite"] = composite
+    result["factor_coverage_pct"] = coverage
+
+    if families is FACTOR_SCORE_COLUMNS or factor_columns is None:
+        try:
+            from core.quality import compute_quality_score
+
+            result = compute_quality_score(result, cfg, group_col=group_col if use_sector else None)
+        except Exception:
+            result["quality_score"] = None
+            result["quality_coverage_pct"] = None
 
     return result
 
@@ -552,6 +726,7 @@ def score_ticker(
     bargain_data = _bargain_fields(raw, factors, analyst, cfg)
     bargain_score = (bargain_data.get("bargain") or {}).get("score")
     altman_z = row.get("altman_z")
+    altman_z_pp = row.get("altman_z_pp")
     sector = _resolved_display_field(raw, row, "sector", ticker=ticker)
 
     factor_breakdown: dict[str, dict] = {}
@@ -571,11 +746,11 @@ def score_ticker(
         "sector": sector,
         "industry": _resolved_display_field(raw, row, "industry", ticker=ticker),
         "exchange": raw.get("exchange"),
-        "price": raw.get("price"),
-        "market_cap": raw.get("market_cap") or row.get("market_cap"),
+        "price": listing_amount(raw, "price"),
+        "market_cap": listing_amount(raw, "market_cap") or row.get("market_cap"),
         "dividend_yield": raw.get("dividend_yield"),
-        "fifty_two_week_high": raw.get("fifty_two_week_high"),
-        "fifty_two_week_low": raw.get("fifty_two_week_low"),
+        "fifty_two_week_high": listing_amount(raw, "fifty_two_week_high"),
+        "fifty_two_week_low": listing_amount(raw, "fifty_two_week_low"),
         "is_etf": False,
         "composite": composite,
         "factor_coverage_pct": factor_coverage_pct,
@@ -583,8 +758,12 @@ def score_ticker(
         "factors_raw": factors_raw,
         "analyst": analyst,
         "altman_z": altman_z,
-        "distress_flag": is_distressed(altman_z, thresholds, sector),
+        "altman_z_pp": altman_z_pp,
+        "distress_flag": is_distressed(altman_z, thresholds, sector, altman_z_pp=altman_z_pp),
         "data_warnings": raw.get("data_warnings", []),
+        "data_quality": raw.get("data_quality"),
+        "currency": raw.get("currency") or "USD",
+        "financial_currency": raw.get("financial_currency"),
         "scored_row": scored_row,
         **bargain_data,
     }
@@ -600,8 +779,9 @@ def score_ticker(
         altman_z=altman_z,
         sector=sector,
         uncertainty_bump=bump,
+        altman_z_pp=altman_z_pp,
     )
-    return analysis
+    return _attach_intrinsic_layers(analysis, raw, cfg, scored_row)
 
 
 def score_universe(config: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -812,9 +992,15 @@ def apply_universe_snapshot_scoring(
     altman_z = snap_row.get("altman_z", updated.get("altman_z"))
     if isinstance(altman_z, float) and np.isnan(altman_z):
         altman_z = updated.get("altman_z")
+    altman_z_pp = snap_row.get("altman_z_pp", updated.get("altman_z_pp"))
+    if isinstance(altman_z_pp, float) and np.isnan(altman_z_pp):
+        altman_z_pp = updated.get("altman_z_pp")
     sector = updated.get("sector") or snap_row.get("sector")
     updated["altman_z"] = altman_z
-    updated["distress_flag"] = is_distressed(altman_z, thresholds, sector)
+    updated["altman_z_pp"] = altman_z_pp
+    updated["distress_flag"] = is_distressed(
+        altman_z, thresholds, sector, altman_z_pp=altman_z_pp
+    )
     uncertainty = compute_uncertainty(
         factor_coverage_pct=updated.get("factor_coverage_pct"),
         volatility_12m=updated.get("volatility_12m"),
@@ -834,8 +1020,31 @@ def apply_universe_snapshot_scoring(
         altman_z=altman_z,
         sector=sector,
         uncertainty_bump=uncertainty.get("threshold_bump") or 0.0,
+        altman_z_pp=altman_z_pp,
     )
-    return updated
+    raw_stub = {
+        "ticker": ticker,
+        "price": updated.get("price"),
+        "market_cap": updated.get("market_cap"),
+        "sector": sector,
+        "industry": updated.get("industry"),
+        "shares_outstanding": updated.get("factors_raw", {}).get("shares_outstanding") if isinstance(updated.get("factors_raw"), dict) else None,
+        "total_cash": None,
+        "total_debt": None,
+        "enterprise_value": None,
+        "accruals": (updated.get("factors_raw") or {}).get("accruals"),
+        "roic": (updated.get("factors_raw") or {}).get("roic"),
+        "net_debt_to_ebitda": snap_row.get("net_debt_to_ebitda"),
+        "interest_coverage": snap_row.get("interest_coverage"),
+        "revenue_5y_cagr": snap_row.get("revenue_5y_cagr"),
+        "gross_margin_5y_delta": snap_row.get("gross_margin_5y_delta"),
+        "share_cagr_3y": snap_row.get("share_cagr_3y"),
+        "fcf_conversion_3y": snap_row.get("fcf_conversion_3y"),
+        "owner_earnings_norm": snap_row.get("owner_earnings_norm"),
+        "altman_z_pp": altman_z_pp,
+        "data_quality": updated.get("data_quality"),
+    }
+    return _attach_intrinsic_layers(updated, raw_stub, cfg, snap_row.to_dict())
 
 
 def _score_without_universe(
@@ -857,11 +1066,11 @@ def _score_without_universe(
         "sector": raw.get("sector"),
         "industry": raw.get("industry"),
         "exchange": raw.get("exchange"),
-        "price": raw.get("price"),
-        "market_cap": raw.get("market_cap"),
+        "price": listing_amount(raw, "price"),
+        "market_cap": listing_amount(raw, "market_cap") or raw.get("market_cap"),
         "dividend_yield": raw.get("dividend_yield"),
-        "fifty_two_week_high": raw.get("fifty_two_week_high"),
-        "fifty_two_week_low": raw.get("fifty_two_week_low"),
+        "fifty_two_week_high": listing_amount(raw, "fifty_two_week_high"),
+        "fifty_two_week_low": listing_amount(raw, "fifty_two_week_low"),
         "is_etf": False,
         "composite": None,
         "factor_coverage_pct": 0.0,
@@ -870,24 +1079,28 @@ def _score_without_universe(
         "analyst": analyst,
         "is_good_buy": False,
         "altman_z": factors.get("altman_z"),
+        "altman_z_pp": factors.get("altman_z_pp"),
         "distress_flag": is_distressed(
-            factors.get("altman_z"), get_thresholds(cfg), raw.get("sector")
+            factors.get("altman_z"),
+            get_thresholds(cfg),
+            raw.get("sector"),
+            altman_z_pp=factors.get("altman_z_pp"),
         ),
         "data_warnings": raw.get("data_warnings", []),
+        "data_quality": raw.get("data_quality"),
+        "currency": raw.get("currency") or "USD",
+        "financial_currency": raw.get("financial_currency"),
         "warning": "Universe snapshot missing. Run jobs/watchlist_weekly.py or core/universe.py to build it.",
         **_bargain_fields(raw, factors, analyst, cfg),
     }
-    return _attach_live_signals(analysis, raw, get_thresholds(cfg))
+    analysis = _attach_live_signals(analysis, raw, get_thresholds(cfg))
+    return _attach_intrinsic_layers(analysis, raw, cfg, None)
 
 
-# Altman Z (1968) was built for industrial firms. Financials carry huge
-# balance sheets with low asset turnover, and regulated utilities / REITs run
-# structurally high leverage, so the classic cutoffs misclassify healthy names
-# (e.g. Aflac, utilities) as distressed. Altman himself excluded financials.
+# Altman Z'' (1995) is valid for non-financials including utilities and REITs.
+# Financials still exempt: the model is not designed for deposit-taking balance sheets.
 ALTMAN_EXEMPT_SECTORS: frozenset[str] = frozenset({
     "Financial Services",
-    "Real Estate",
-    "Utilities",
 })
 
 
@@ -895,22 +1108,21 @@ def is_distressed(
     altman_z: float | None,
     thresholds: dict | None = None,
     sector: str | None = None,
+    *,
+    altman_z_pp: float | None = None,
 ) -> bool:
     """
-    Hard distress disqualifier: Altman Z below the distress-zone cutoff (1.8).
+    Hard distress disqualifier using Altman Z'' (1995), cutoff 1.1.
 
-    A distress signal is treated non-linearly (a hard gate) rather than as a
-    small linear drag on the balance-sheet group, mirroring how Morningstar
-    and GuruFocus handle distress metrics. Missing Z never blocks, and sectors
-    where the classic Z model is invalid (financials, real estate, utilities)
-    are exempt.
+    Missing Z'' never blocks. Financials are exempt.
     """
     if sector is not None and str(sector) in ALTMAN_EXEMPT_SECTORS:
         return False
-    if altman_z is None or (isinstance(altman_z, float) and np.isnan(altman_z)):
+    z = altman_z_pp if altman_z_pp is not None else altman_z
+    if z is None or (isinstance(z, float) and np.isnan(z)):
         return False
-    z_min = float((thresholds or {}).get("altman_z_min", 1.8))
-    return float(altman_z) < z_min
+    z_min = float((thresholds or {}).get("altman_zpp_min", 1.1))
+    return float(z) < z_min
 
 
 def _evaluate_good_buy(
@@ -924,6 +1136,7 @@ def _evaluate_good_buy(
     altman_z: float | None = None,
     sector: str | None = None,
     uncertainty_bump: float | None = None,
+    altman_z_pp: float | None = None,
 ) -> bool:
     """
     Good-buy gate: composite + bargain + factor coverage + no distress
@@ -934,10 +1147,8 @@ def _evaluate_good_buy(
     a stock scored on 2 of 7 groups would otherwise look as trustworthy as one
     scored on all 7. Rows without a coverage figure (None) are not blocked.
 
-    The Altman-Z distress gate blocks names in the distress zone (Z < 1.8)
-    outright — a linear composite would only nudge them down a few points.
-    Sectors where the classic Z model is invalid (financials, real estate,
-    utilities) are exempt.
+    The Altman Z'' distress gate blocks names below 1.1 outright.
+    Financials are exempt; missing Z'' never blocks.
 
     High uncertainty widens the composite/bargain cutoffs (Morningstar-style
     larger required discount when the estimate is noisier).
@@ -959,12 +1170,16 @@ def _evaluate_good_buy(
         return False
     if factor_coverage_pct is not None and factor_coverage_pct < coverage_min:
         return False
-    if is_distressed(altman_z, thresholds, sector):
+    if is_distressed(altman_z, thresholds, sector, altman_z_pp=altman_z_pp):
         return False
     if require_upside and (implied_upside is None or implied_upside < upside_min):
         return False
-    if exclude_sell and analyst.get("consensus_label") == "Sell":
-        return False
+    if exclude_sell:
+        blocked = {"Sell"}
+        if bool(thresholds.get("exclude_underperform", True)):
+            blocked.add("Underperform")
+        if analyst.get("consensus_label") in blocked:
+            return False
     return True
 
 

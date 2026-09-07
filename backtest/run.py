@@ -42,13 +42,75 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     logger.info("Building S&P 500 membership panel")
     build_membership_panel(force=args.force)
     logger.info("Ingesting SEC EDGAR fundamentals")
-    ingest_edgar(force=args.force, max_quarters=args.max_edgar_quarters)
+    ingest_edgar(
+        force=args.force,
+        max_quarters=args.max_edgar_quarters,
+        max_tickers=args.max_tickers,
+    )
     logger.info("Downloading price history")
     ingest_prices(force=args.force, max_tickers=args.max_tickers)
 
 
 def cmd_build_factors(args: argparse.Namespace) -> None:
     build_factor_panel(force=args.force, max_quarters=args.max_quarters)
+
+
+def cmd_evaluate(args: argparse.Namespace) -> None:
+    from backtest.engine import precompute_multi_horizon_returns, score_factor_panel
+    from backtest.factors import load_factor_panel
+    from backtest.registry import all_metrics, evaluate_metric, format_card, get_metric
+    from backtest.data.prices import load_prices
+    from core.config import load_config
+
+    panel = load_factor_panel()
+    cfg = load_config()
+    scored = score_factor_panel(panel, get_factor_weights(cfg))
+    try:
+        prices = load_prices()
+        scored = scored.merge(
+            precompute_multi_horizon_returns(scored, prices),
+            left_on=["quarter_end", "ticker"],
+            right_on=["as_of_quarter", "ticker"],
+            how="left",
+        )
+    except Exception as exc:
+        logger.warning("Forward returns unavailable: %s", exc)
+    names = [s.name for s in all_metrics()] if args.metric == "all" else [args.metric]
+    for name in names:
+        spec = get_metric(name)
+        if spec is None:
+            logger.error("Unknown metric %s; known: %s", name, ", ".join(m.name for m in all_metrics()))
+            continue
+        card = evaluate_metric(scored, spec)
+        print(format_card(card))
+        print()
+
+
+def cmd_evaluate_signal(args: argparse.Namespace) -> None:
+    from backtest.engine import precompute_multi_horizon_returns, score_factor_panel
+    from backtest.factors import load_factor_panel
+    from backtest.registry import evaluate_signal, get_signal
+    from backtest.data.prices import load_prices
+    from core.config import load_config
+    import json
+
+    spec = get_signal(args.signal)
+    if spec is None:
+        raise SystemExit(f"Unknown signal {args.signal}")
+    panel = load_factor_panel()
+    cfg = load_config()
+    scored = score_factor_panel(panel, get_factor_weights(cfg))
+    try:
+        prices = load_prices()
+        scored = scored.merge(
+            precompute_multi_horizon_returns(scored, prices),
+            left_on=["quarter_end", "ticker"],
+            right_on=["as_of_quarter", "ticker"],
+            how="left",
+        )
+    except Exception as exc:
+        logger.warning("Forward returns unavailable: %s", exc)
+    print(json.dumps(evaluate_signal(scored, spec), indent=2, default=str))
 
 
 def cmd_tune(args: argparse.Namespace) -> None:
@@ -116,12 +178,16 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 
 def cmd_apply(args: argparse.Namespace) -> None:
-    """Apply validated weights/thresholds to config.yaml."""
+    """Apply validated weights to config.yaml. Thresholds require --allow-in-sample."""
     import yaml
+
+    from backtest.stats import get_run_id
 
     comparison_path = RESULTS_DIR / "weight_candidate_comparison.json"
     bargain_path = RESULTS_DIR / "bargain_tuning_results.json"
     threshold_path = RESULTS_DIR / "threshold_calibration.json"
+    config_path = ROOT / "config.yaml"
+    allow_in_sample = bool(getattr(args, "allow_in_sample", False))
 
     use_dca_cv = getattr(args, "use_dca_cv", False)
     if use_dca_cv:
@@ -147,25 +213,39 @@ def cmd_apply(args: argparse.Namespace) -> None:
     merged.update(winner_fw)
     cfg["factor_weights"] = {k: round(float(v), 4) for k, v in merged.items()}
 
-    if thresholds:
+    thresholds_updated = False
+    if thresholds and allow_in_sample:
         cfg.setdefault("thresholds", {})
         cfg["thresholds"]["composite_min"] = round(float(thresholds["composite_min"]), 1)
         cfg["thresholds"]["bargain_min"] = round(float(thresholds["bargain_min"]), 1)
         cfg["thresholds"]["require_implied_upside"] = False
+        thresholds_updated = True
+    elif thresholds and not allow_in_sample:
+        logger.warning(
+            "Refusing to write return-fitted thresholds without --allow-in-sample "
+            "(leaving thresholds untouched)"
+        )
 
     if bargain.get("winner_weights"):
         full_bw = get_bargain_weights(cfg)
         full_bw.update({k: round(float(v), 4) for k, v in bargain["winner_weights"].items()})
         cfg["bargain_weights"] = full_bw
 
-    config_path = ROOT / "config.yaml"
+    cfg["provenance"] = {
+        "run_id": get_run_id(),
+        "thresholds_updated": thresholds_updated,
+    }
+
     with config_path.open("w", encoding="utf-8") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-    logger.info("Updated %s with validated factor weights and thresholds", config_path)
+    logger.info("Updated %s with validated factor weights (thresholds_updated=%s)", config_path, thresholds_updated)
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
+    from backtest.stats import set_run_id, new_run_id
+
+    set_run_id(new_run_id())
     cmd_ingest(args)
     cmd_build_factors(args)
     cmd_compare(args)
@@ -192,6 +272,11 @@ def _add_shared_args(p: argparse.ArgumentParser) -> None:
         help="On apply, take factor weights from the DCA k-fold CV winner "
         "(tuning_results_dca_cv.json) instead of the candidate comparison",
     )
+    p.add_argument(
+        "--allow-in-sample",
+        action="store_true",
+        help="Allow apply to write return-fitted composite/bargain thresholds",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -212,6 +297,14 @@ def build_parser() -> argparse.ArgumentParser:
     ]:
         sp = sub.add_parser(name, help=help_text)
         _add_shared_args(sp)
+
+    ev = sub.add_parser("evaluate", help="Print an evidence card for a registered metric")
+    _add_shared_args(ev)
+    ev.add_argument("--metric", default="quality_score", help="Metric name or 'all'")
+
+    es = sub.add_parser("evaluate-signal", help="Evaluate a registered decision signal")
+    _add_shared_args(es)
+    es.add_argument("--signal", default="decision")
     return p
 
 
@@ -229,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         "report": cmd_report,
         "apply": cmd_apply,
         "pipeline": cmd_pipeline,
+        "evaluate": cmd_evaluate,
+        "evaluate-signal": cmd_evaluate_signal,
     }
     handlers[args.command](args)
     return 0

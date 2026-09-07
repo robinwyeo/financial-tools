@@ -31,6 +31,7 @@ def _minimal_config() -> dict:
             "require_implied_upside": False,
             "exclude_sell_consensus": True,
         },
+        "decision": {"mode": "legacy"},
     }
 
 
@@ -396,9 +397,51 @@ def test_score_ticker_survives_empty_quote_info(monkeypatch):
 
     analysis = score_ticker("AMZN", _minimal_config(), universe_df=uni)
     assert analysis["sector"] == "Tech"
+    assert "data_quality" in analysis
     for family in FACTOR_SCORE_COLUMNS:
         assert family in analysis["factor_breakdown"]
         assert "percentile" in analysis["factor_breakdown"][family]
+
+
+def test_score_ticker_propagates_listing_currency(monkeypatch):
+    uni = _minimal_df()
+    uni.loc[0, "ticker"] = "SHOP.TO"
+    uni = uni.head(1).copy()
+
+    def fake_build(_ticker: str) -> dict:
+        return {
+            "ticker": "SHOP.TO",
+            "name": "Shopify",
+            "sector": "Technology",
+            "industry": None,
+            "price": 73.0,
+            "price_listing": 100.0,
+            "market_cap": 73e9,
+            "market_cap_listing": 100e9,
+            "currency": "CAD",
+            "financial_currency": "USD",
+            "fifty_two_week_high": 80.0,
+            "fifty_two_week_high_listing": 110.0,
+            "fifty_two_week_low": 50.0,
+            "data_warnings": [],
+            "data_quality": {"grade": "B"},
+            "recommendations": None,
+            "target_mean": 90.0,
+            "target_mean_listing": 123.0,
+            "num_analysts": 10,
+        }
+
+    all_sub_cols = [col for cols in FACTOR_SCORE_COLUMNS.values() for col in cols]
+    monkeypatch.setattr("core.scoring.is_fund", lambda t: False)
+    monkeypatch.setattr("core.scoring.build_raw_metrics", fake_build)
+    monkeypatch.setattr(
+        "core.scoring.compute_all_factors",
+        lambda _raw: {col: None for col in all_sub_cols},
+    )
+    analysis = score_ticker("SHOP.TO", _minimal_config(), universe_df=uni)
+    assert analysis["currency"] == "CAD"
+    assert analysis["price"] == pytest.approx(100.0)
+    assert analysis["analyst"]["target_mean"] == pytest.approx(123.0)
 
 
 def test_evaluate_good_buy_requires_composite_and_bargain_not_upside():
@@ -439,33 +482,35 @@ def test_evaluate_good_buy_altman_distress_gate():
     thresholds = {
         "composite_min": 50,
         "bargain_min": 50,
-        "altman_z_min": 1.8,
+        "altman_zpp_min": 1.1,
         "require_implied_upside": False,
         "exclude_sell_consensus": True,
     }
     analyst = {"consensus_label": "Buy"}
     common = dict(bargain_score=60)
-    # Healthy Z passes; distress-zone Z blocks regardless of scores.
-    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=3.0, **common) is True
-    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=1.5, **common) is False
+    # Healthy Z'' passes; distress-zone Z'' blocks regardless of scores.
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z_pp=3.0, **common) is True
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z_pp=0.8, **common) is False
     # Missing Z never blocks (e.g. financials where Z is undefined).
-    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=None, **common) is True
-    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z=float("nan"), **common) is True
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z_pp=None, **common) is True
+    assert _evaluate_good_buy(80, 20, analyst, thresholds, altman_z_pp=float("nan"), **common) is True
 
 
 def test_is_distressed():
-    assert is_distressed(1.5) is True
-    assert is_distressed(1.8) is False
+    assert is_distressed(0.8) is True
+    assert is_distressed(1.1) is False
     assert is_distressed(3.0) is False
     assert is_distressed(None) is False
     assert is_distressed(float("nan")) is False
-    # Configurable cutoff.
-    assert is_distressed(2.5, {"altman_z_min": 3.0}) is True
-    # Classic Z is invalid for financials / real estate / utilities — exempt.
+    # Configurable cutoff (Z'').
+    assert is_distressed(1.5, {"altman_zpp_min": 2.0}) is True
+    # Financials remain exempt; utilities and RE are scored with Z''.
     assert is_distressed(0.8, None, "Financial Services") is False
-    assert is_distressed(0.8, None, "Real Estate") is False
-    assert is_distressed(0.8, None, "Utilities") is False
+    assert is_distressed(0.8, None, "Real Estate") is True
+    assert is_distressed(0.8, None, "Utilities") is True
     assert is_distressed(0.8, None, "Technology") is True
+    # Explicit Z'' wins over a legacy classic-Z argument.
+    assert is_distressed(3.0, None, "Technology", altman_z_pp=0.5) is True
 
 
 def test_evaluate_good_buy_uncertainty_widens_hurdles():
@@ -497,3 +542,96 @@ def test_evaluate_good_buy_optional_upside_gate():
     analyst = {"consensus_label": "Buy"}
     assert _evaluate_good_buy(55, 20, analyst, thresholds, bargain_score=60) is True
     assert _evaluate_good_buy(55, 14, analyst, thresholds, bargain_score=60) is False
+
+
+def test_evaluate_good_buy_excludes_underperform():
+    thresholds = {
+        "composite_min": 50,
+        "bargain_min": 50,
+        "require_implied_upside": False,
+        "exclude_sell_consensus": True,
+        "exclude_underperform": True,
+    }
+    assert _evaluate_good_buy(
+        55, 20, {"consensus_label": "Underperform"}, thresholds, bargain_score=60
+    ) is False
+    thresholds["exclude_underperform"] = False
+    assert _evaluate_good_buy(
+        55, 20, {"consensus_label": "Underperform"}, thresholds, bargain_score=60
+    ) is True
+    assert _evaluate_good_buy(
+        55, 20, {"consensus_label": "Sell"}, thresholds, bargain_score=60
+    ) is False
+    thresholds["exclude_sell_consensus"] = False
+    assert _evaluate_good_buy(
+        55, 20, {"consensus_label": "Sell"}, thresholds, bargain_score=60
+    ) is True
+
+
+def test_composite_coverage_uses_sub_signal_fraction():
+    """A quality group with 1 of 7 sub-signals is not 100% covered."""
+    weights = {"quality": 1.0}
+    families = {
+        "quality": [
+            "gross_profitability",
+            "roe",
+            "roa",
+            "profit_margin",
+            "roic",
+            "earnings_quality",
+            "financial_strength",
+        ]
+    }
+    row = pd.Series({"pct_quality": 80.0, "gross_profitability": 0.4})
+    composite, coverage = _composite_and_coverage(row, weights, families)
+    assert composite == 80.0
+    assert coverage == pytest.approx(100.0 / 7)
+
+
+def test_vectorized_composite_matches_rowwise():
+    df = _minimal_df()
+    cfg = _minimal_config()
+    scored = score_universe_df(df, cfg)
+    weights = cfg["factor_weights"]
+    for _, row in scored.iterrows():
+        c, cov = _composite_and_coverage(row, weights)
+        assert scored.loc[row.name, "composite"] == pytest.approx(c)
+        assert scored.loc[row.name, "factor_coverage_pct"] == pytest.approx(cov)
+
+
+def test_sector_fallback_when_group_too_small():
+    """A 4-name sector falls back to universe-wide percentiles."""
+    rows = []
+    for i in range(8):
+        row = {
+            "ticker": f"T{i}",
+            "sector": "Micro" if i < 4 else "Large",
+            "earnings_yield": float(i + 1),
+            "fcf_yield": 0.05,
+            "book_to_market": 0.3,
+        }
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    from core.scoring import _score_column
+
+    pct = _score_column(df, "earnings_yield", "sector", min_group_size=5)
+    # Micro names still get a percentile (universe fallback), not NaN.
+    assert pct.notna().all()
+    assert pct.iloc[0] < pct.iloc[-1]
+
+
+def test_apply_universe_snapshot_scoring_keeps_decision_mode(monkeypatch):
+    cfg = _minimal_config()
+    uni = score_universe_df(_minimal_df(), cfg)
+    analysis = {
+        "ticker": "AAA",
+        "composite": 10.0,
+        "bargain": {"score": 10.0},
+        "analyst": {"consensus_label": "Buy", "implied_upside_pct": 20},
+        "factors_raw": {},
+        "factor_coverage_pct": 90.0,
+        "is_good_buy": False,
+    }
+    updated = apply_universe_snapshot_scoring(analysis, uni, "AAA", cfg)
+    assert "composite" in updated
+    assert updated["ticker"] == "AAA"

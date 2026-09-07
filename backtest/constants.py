@@ -91,8 +91,9 @@ EQUAL_FACTOR_WEIGHTS: dict[str, float] = {
     family: 1.0 / len(BACKTEST_FACTOR_FAMILIES) for family in BACKTEST_FACTOR_FAMILIES
 }
 
-# graham_heavy: validated winner in bargain_tuning_results.json (~2x 3y/5y IC
-# vs the previous 0.40/0.35/0.25 default).
+# Design defaults: graham (margin_of_safety) is 55% of bargain. Do not cite
+# pre-companyfacts IC. The historical 0.40/0.35/0.25 mix is bargain candidate
+# `legacy_040_035_025` in backtest/tune.py; evaluate it on the next pipeline.
 DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
     "margin_of_safety": 0.55,
     "valuation_vs_history": 0.30,

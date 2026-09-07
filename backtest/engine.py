@@ -57,41 +57,27 @@ class BacktestResult:
     horizon_ics: dict[str, float] = field(default_factory=dict)
 
 
-_SECTOR_MAP: pd.Series | None = None
-
-
-def _load_sector_map() -> pd.Series | None:
-    """Cached ticker→sector map from the live universe snapshot."""
-    global _SECTOR_MAP
-    if _SECTOR_MAP is not None:
-        return _SECTOR_MAP if not _SECTOR_MAP.empty else None
-    try:
-        from core.universe import load_universe_snapshot
-
-        snap = load_universe_snapshot()
-    except Exception:
-        _SECTOR_MAP = pd.Series(dtype=object)
-        return None
-    if snap is None or snap.empty or "sector" not in snap.columns:
-        _SECTOR_MAP = pd.Series(dtype=object)
-        return None
-    _SECTOR_MAP = (
-        snap.assign(ticker=snap["ticker"].astype(str).str.upper())
-        .drop_duplicates("ticker")
-        .set_index("ticker")["sector"]
-    )
-    return _SECTOR_MAP
+_SECTOR_MAP: dict[str, str] | None = None
 
 
 def _attach_sector_if_missing(df: pd.DataFrame) -> pd.DataFrame:
-    """Attach sector from the live universe snapshot when the panel lacks it."""
-    if "sector" in df.columns and df["sector"].notna().any():
-        return df
-    sector_map = _load_sector_map()
-    if sector_map is None or sector_map.empty:
-        return df
+    """Fill missing sector from SIC (SEC submissions), not the live snapshot."""
     out = df.copy()
-    out["sector"] = out["ticker"].astype(str).str.upper().map(sector_map)
+    if "sector" not in out.columns:
+        out["sector"] = pd.NA
+    missing = out["sector"].isna() | (out["sector"].astype(str).str.strip() == "") | (
+        out["sector"].astype(str) == "nan"
+    )
+    if not missing.any():
+        return out
+    from backtest.data.constituents import sector_map_for_tickers
+
+    tickers = out.loc[missing, "ticker"].astype(str).str.upper().unique().tolist()
+    mapping = sector_map_for_tickers(tickers)
+    if not mapping:
+        return out
+    filled = out.loc[missing, "ticker"].astype(str).str.upper().map(mapping)
+    out.loc[missing, "sector"] = filled
     return out
 
 
@@ -365,7 +351,7 @@ def bootstrap_mean_ci(
     }
 
 
-def dca_fold_excess_roi(
+def dca_block_excess_roi(
     picks_by_quarter: dict[pd.Timestamp, list[str]],
     quarter_end_prices: dict[tuple[pd.Timestamp, str], float],
     fold_quarters: list[pd.Timestamp],
@@ -375,7 +361,7 @@ def dca_fold_excess_roi(
     delist_return: float = DEFAULT_DELIST_RETURN,
     transaction_cost_bps: float = TRANSACTION_COST_BPS,
 ) -> float | None:
-    """Excess ROI of a $20k/quarter gated DCA campaign vs SPY within one fold."""
+    """Block ROI (<= 2y) of a $20k/quarter gated DCA campaign vs SPY."""
     cost_frac = transaction_cost_bps / 10_000.0
     positions: dict[str, dict[str, float]] = {}
     invested = 0.0
@@ -421,6 +407,9 @@ def dca_fold_excess_roi(
     spy_roi = spy_shares * spy_end / spy_invested - 1.0
 
     return strat_roi - spy_roi
+
+
+dca_fold_excess_roi = dca_block_excess_roi
 
 
 def init_backtest_cache(
@@ -516,26 +505,62 @@ def compute_horizon_ics(
     scored: pd.DataFrame,
     multi_horizon: pd.DataFrame,
     score_col: str = "composite",
-) -> dict[str, float]:
-    """Mean Spearman IC of ``score_col`` vs each forward horizon."""
+) -> dict[str, Any]:
+    """Mean Spearman IC of ``score_col`` vs each forward horizon, plus NW stats."""
+    from backtest.constants import FORWARD_HORIZON_QUARTERS
+    from backtest.stats import (
+        block_bootstrap_ci,
+        decile_spread,
+        evidence_card,
+        n_independent_windows,
+        newey_west_tstat,
+    )
+
     if multi_horizon is None or multi_horizon.empty:
         return {}
-    out: dict[str, float] = {}
+    out: dict[str, Any] = {}
+    stats: dict[str, Any] = {}
     scored = scored.copy()
     scored["as_of_quarter"] = pd.to_datetime(scored["quarter_end"])
-    for name in FORWARD_HORIZON_QUARTERS:
+    n_names = max(int(scored.groupby("as_of_quarter")["ticker"].nunique().median() or 0), 1)
+    for name, hq in FORWARD_HORIZON_QUARTERS.items():
         col = f"fwd_{name}"
         if col not in multi_horizon.columns:
             continue
         ics: list[float] = []
+        coverage_vals: list[float] = []
         for qend, grp in scored.groupby("as_of_quarter"):
             s = grp[["ticker", score_col]].dropna()
             fwd = multi_horizon[multi_horizon["as_of_quarter"] == qend][["ticker", col]].dropna()
             merged = s.merge(fwd, on="ticker", how="inner")
+            if not s.empty:
+                coverage_vals.append(len(merged) / max(len(s), 1))
             ic = _spearman_ic(merged[score_col], merged[col])
             if ic is not None:
                 ics.append(ic)
-        out[name] = float(np.mean(ics)) if ics else 0.0
+        mean = float(np.mean(ics)) if ics else 0.0
+        out[name] = mean
+        lag = max(int(hq) - 1, 0)
+        spread = decile_spread(scored, multi_horizon, score_col, name)
+        coverage = float(np.mean(coverage_vals)) if coverage_vals else None
+        card = evidence_card(
+            name=f"{score_col}:{name}",
+            ic_series=ics,
+            horizon_quarters=int(hq),
+            coverage=coverage,
+            spread=spread,
+        )
+        stats[name] = {
+            **card,
+            "mean": mean,
+            "nw_tstat": newey_west_tstat(ics, lag),
+            "n_quarters": len(ics),
+            "n_independent_windows": n_independent_windows(len(ics), int(hq)),
+            "ic_ci": block_bootstrap_ci(ics, block=12, seed=42),
+            "series": ics,
+            "decile_spread": spread,
+        }
+    out["_stats"] = stats
     return out
 
 

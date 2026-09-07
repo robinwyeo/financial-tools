@@ -5,770 +5,600 @@
     "benchmark_ticker": "SPY",
     "transaction_cost_bps": 10.0,
     "period_start": "2010-03-31 00:00:00",
-    "period_end": "2026-03-31 00:00:00",
-    "quarters_with_investment": 65
+    "period_end": "2012-12-31 00:00:00",
+    "quarters_with_investment": 12,
+    "in_sample": true,
+    "survivorship_biased": true
   },
   "default_delist_return": -0.5,
+  "delist_note": "DEFAULT_DELIST_RETURN applies only when a held name loses prices mid-life; names with no price at pick time are never bought.",
+  "price_coverage": [
+    {
+      "quarter_end": "2010-03-31",
+      "n_constituents": 499,
+      "n_with_price": 345,
+      "price_coverage_pct": 0.6913827655310621
+    },
+    {
+      "quarter_end": "2010-06-30",
+      "n_constituents": 499,
+      "n_with_price": 346,
+      "price_coverage_pct": 0.6933867735470942
+    },
+    {
+      "quarter_end": "2010-09-30",
+      "n_constituents": 497,
+      "n_with_price": 345,
+      "price_coverage_pct": 0.6941649899396378
+    },
+    {
+      "quarter_end": "2010-12-31",
+      "n_constituents": 497,
+      "n_with_price": 346,
+      "price_coverage_pct": 0.6961770623742455
+    },
+    {
+      "quarter_end": "2011-03-31",
+      "n_constituents": 497,
+      "n_with_price": 346,
+      "price_coverage_pct": 0.6961770623742455
+    },
+    {
+      "quarter_end": "2011-06-30",
+      "n_constituents": 497,
+      "n_with_price": 347,
+      "price_coverage_pct": 0.6981891348088531
+    },
+    {
+      "quarter_end": "2011-09-30",
+      "n_constituents": 497,
+      "n_with_price": 350,
+      "price_coverage_pct": 0.704225352112676
+    },
+    {
+      "quarter_end": "2011-12-31",
+      "n_constituents": 497,
+      "n_with_price": 355,
+      "price_coverage_pct": 0.7142857142857143
+    },
+    {
+      "quarter_end": "2012-03-31",
+      "n_constituents": 497,
+      "n_with_price": 355,
+      "price_coverage_pct": 0.7142857142857143
+    },
+    {
+      "quarter_end": "2012-06-30",
+      "n_constituents": 497,
+      "n_with_price": 359,
+      "price_coverage_pct": 0.7223340040241448
+    },
+    {
+      "quarter_end": "2012-09-30",
+      "n_constituents": 497,
+      "n_with_price": 362,
+      "price_coverage_pct": 0.7283702213279678
+    },
+    {
+      "quarter_end": "2012-12-31",
+      "n_constituents": 497,
+      "n_with_price": 363,
+      "price_coverage_pct": 0.7303822937625755
+    },
+    {
+      "quarter_end": "2013-03-31",
+      "n_constituents": 497,
+      "n_with_price": 366,
+      "price_coverage_pct": 0.7364185110663984
+    },
+    {
+      "quarter_end": "2013-06-30",
+      "n_constituents": 497,
+      "n_with_price": 368,
+      "price_coverage_pct": 0.7404426559356136
+    },
+    {
+      "quarter_end": "2013-09-30",
+      "n_constituents": 497,
+      "n_with_price": 369,
+      "price_coverage_pct": 0.7424547283702213
+    },
+    {
+      "quarter_end": "2013-12-31",
+      "n_constituents": 497,
+      "n_with_price": 368,
+      "price_coverage_pct": 0.7404426559356136
+    },
+    {
+      "quarter_end": "2014-03-31",
+      "n_constituents": 497,
+      "n_with_price": 369,
+      "price_coverage_pct": 0.7424547283702213
+    },
+    {
+      "quarter_end": "2014-06-30",
+      "n_constituents": 498,
+      "n_with_price": 372,
+      "price_coverage_pct": 0.7469879518072289
+    },
+    {
+      "quarter_end": "2014-09-30",
+      "n_constituents": 499,
+      "n_with_price": 375,
+      "price_coverage_pct": 0.751503006012024
+    },
+    {
+      "quarter_end": "2014-12-31",
+      "n_constituents": 499,
+      "n_with_price": 374,
+      "price_coverage_pct": 0.749498997995992
+    },
+    {
+      "quarter_end": "2015-03-31",
+      "n_constituents": 500,
+      "n_with_price": 380,
+      "price_coverage_pct": 0.76
+    },
+    {
+      "quarter_end": "2015-06-30",
+      "n_constituents": 499,
+      "n_with_price": 382,
+      "price_coverage_pct": 0.7655310621242485
+    },
+    {
+      "quarter_end": "2015-09-30",
+      "n_constituents": 503,
+      "n_with_price": 389,
+      "price_coverage_pct": 0.7733598409542743
+    },
+    {
+      "quarter_end": "2015-12-31",
+      "n_constituents": 502,
+      "n_with_price": 393,
+      "price_coverage_pct": 0.7828685258964143
+    },
+    {
+      "quarter_end": "2016-03-31",
+      "n_constituents": 505,
+      "n_with_price": 399,
+      "price_coverage_pct": 0.7900990099009901
+    },
+    {
+      "quarter_end": "2016-06-30",
+      "n_constituents": 505,
+      "n_with_price": 405,
+      "price_coverage_pct": 0.801980198019802
+    },
+    {
+      "quarter_end": "2016-09-30",
+      "n_constituents": 506,
+      "n_with_price": 410,
+      "price_coverage_pct": 0.8102766798418972
+    },
+    {
+      "quarter_end": "2016-12-31",
+      "n_constituents": 506,
+      "n_with_price": 412,
+      "price_coverage_pct": 0.8142292490118577
+    },
+    {
+      "quarter_end": "2017-03-31",
+      "n_constituents": 506,
+      "n_with_price": 416,
+      "price_coverage_pct": 0.8221343873517787
+    },
+    {
+      "quarter_end": "2017-06-30",
+      "n_constituents": 506,
+      "n_with_price": 419,
+      "price_coverage_pct": 0.8280632411067194
+    },
+    {
+      "quarter_end": "2017-09-30",
+      "n_constituents": 506,
+      "n_with_price": 422,
+      "price_coverage_pct": 0.83399209486166
+    },
+    {
+      "quarter_end": "2017-12-31",
+      "n_constituents": 505,
+      "n_with_price": 423,
+      "price_coverage_pct": 0.8376237623762376
+    },
+    {
+      "quarter_end": "2018-03-31",
+      "n_constituents": 506,
+      "n_with_price": 426,
+      "price_coverage_pct": 0.841897233201581
+    },
+    {
+      "quarter_end": "2018-06-30",
+      "n_constituents": 506,
+      "n_with_price": 424,
+      "price_coverage_pct": 0.8379446640316206
+    },
+    {
+      "quarter_end": "2018-09-30",
+      "n_constituents": 505,
+      "n_with_price": 425,
+      "price_coverage_pct": 0.8415841584158416
+    },
+    {
+      "quarter_end": "2018-12-31",
+      "n_constituents": 505,
+      "n_with_price": 427,
+      "price_coverage_pct": 0.8455445544554455
+    },
+    {
+      "quarter_end": "2019-03-31",
+      "n_constituents": 505,
+      "n_with_price": 428,
+      "price_coverage_pct": 0.8475247524752475
+    },
+    {
+      "quarter_end": "2019-06-30",
+      "n_constituents": 505,
+      "n_with_price": 430,
+      "price_coverage_pct": 0.8514851485148515
+    },
+    {
+      "quarter_end": "2019-09-30",
+      "n_constituents": 505,
+      "n_with_price": 436,
+      "price_coverage_pct": 0.8633663366336634
+    },
+    {
+      "quarter_end": "2019-12-31",
+      "n_constituents": 505,
+      "n_with_price": 441,
+      "price_coverage_pct": 0.8732673267326733
+    },
+    {
+      "quarter_end": "2020-03-31",
+      "n_constituents": 505,
+      "n_with_price": 443,
+      "price_coverage_pct": 0.8772277227722772
+    },
+    {
+      "quarter_end": "2020-06-30",
+      "n_constituents": 505,
+      "n_with_price": 449,
+      "price_coverage_pct": 0.8891089108910891
+    },
+    {
+      "quarter_end": "2020-09-30",
+      "n_constituents": 505,
+      "n_with_price": 449,
+      "price_coverage_pct": 0.8891089108910891
+    },
+    {
+      "quarter_end": "2020-12-31",
+      "n_constituents": 505,
+      "n_with_price": 452,
+      "price_coverage_pct": 0.8950495049504951
+    },
+    {
+      "quarter_end": "2021-03-31",
+      "n_constituents": 505,
+      "n_with_price": 454,
+      "price_coverage_pct": 0.899009900990099
+    },
+    {
+      "quarter_end": "2021-06-30",
+      "n_constituents": 505,
+      "n_with_price": 457,
+      "price_coverage_pct": 0.904950495049505
+    },
+    {
+      "quarter_end": "2021-09-30",
+      "n_constituents": 505,
+      "n_with_price": 459,
+      "price_coverage_pct": 0.9089108910891089
+    },
+    {
+      "quarter_end": "2021-12-31",
+      "n_constituents": 505,
+      "n_with_price": 461,
+      "price_coverage_pct": 0.9128712871287129
+    },
+    {
+      "quarter_end": "2022-03-31",
+      "n_constituents": 505,
+      "n_with_price": 465,
+      "price_coverage_pct": 0.9207920792079208
+    },
+    {
+      "quarter_end": "2022-06-30",
+      "n_constituents": 503,
+      "n_with_price": 470,
+      "price_coverage_pct": 0.9343936381709742
+    },
+    {
+      "quarter_end": "2022-09-30",
+      "n_constituents": 503,
+      "n_with_price": 470,
+      "price_coverage_pct": 0.9343936381709742
+    },
+    {
+      "quarter_end": "2022-12-31",
+      "n_constituents": 503,
+      "n_with_price": 477,
+      "price_coverage_pct": 0.94831013916501
+    },
+    {
+      "quarter_end": "2023-03-31",
+      "n_constituents": 503,
+      "n_with_price": 479,
+      "price_coverage_pct": 0.952286282306163
+    },
+    {
+      "quarter_end": "2023-06-30",
+      "n_constituents": 503,
+      "n_with_price": 481,
+      "price_coverage_pct": 0.9562624254473161
+    },
+    {
+      "quarter_end": "2023-09-30",
+      "n_constituents": 503,
+      "n_with_price": 483,
+      "price_coverage_pct": 0.9602385685884692
+    },
+    {
+      "quarter_end": "2023-12-31",
+      "n_constituents": 503,
+      "n_with_price": 484,
+      "price_coverage_pct": 0.9622266401590457
+    },
+    {
+      "quarter_end": "2024-03-31",
+      "n_constituents": 503,
+      "n_with_price": 486,
+      "price_coverage_pct": 0.9662027833001988
+    },
+    {
+      "quarter_end": "2024-06-30",
+      "n_constituents": 503,
+      "n_with_price": 488,
+      "price_coverage_pct": 0.9701789264413518
+    },
+    {
+      "quarter_end": "2024-09-30",
+      "n_constituents": 504,
+      "n_with_price": 490,
+      "price_coverage_pct": 0.9722222222222222
+    },
+    {
+      "quarter_end": "2024-12-31",
+      "n_constituents": 503,
+      "n_with_price": 491,
+      "price_coverage_pct": 0.9761431411530815
+    },
+    {
+      "quarter_end": "2025-03-31",
+      "n_constituents": 503,
+      "n_with_price": 491,
+      "price_coverage_pct": 0.9761431411530815
+    },
+    {
+      "quarter_end": "2025-06-30",
+      "n_constituents": 503,
+      "n_with_price": 492,
+      "price_coverage_pct": 0.9781312127236581
+    },
+    {
+      "quarter_end": "2025-09-30",
+      "n_constituents": 503,
+      "n_with_price": 497,
+      "price_coverage_pct": 0.9880715705765407
+    },
+    {
+      "quarter_end": "2025-12-31",
+      "n_constituents": 503,
+      "n_with_price": 500,
+      "price_coverage_pct": 0.9940357852882704
+    },
+    {
+      "quarter_end": "2026-03-31",
+      "n_constituents": 503,
+      "n_with_price": 502,
+      "price_coverage_pct": 0.9980119284294234
+    }
+  ],
+  "price_coverage_pct": 0.8372402814775405,
   "old_weights": {
-    "value": 0.030105263157894736,
-    "garp": 0.4348421052631579,
-    "quality": 0.10968421052631579,
-    "balance_sheet": 0.1436842105263158,
-    "momentum": 0.07242105263157894,
-    "low_volatility": 0.13905263157894734,
-    "capital_discipline": 0.07021052631578946
+    "value": 0.026342105263157896,
+    "garp": 0.3804868421052632,
+    "quality": 0.09597368421052631,
+    "balance_sheet": 0.12572368421052632,
+    "momentum": 0.06336842105263157,
+    "low_volatility": 0.12167105263157894,
+    "capital_discipline": 0.061434210526315786
   },
   "new_weights": {
     "value": 0.25,
-    "garp": 0.1,
-    "quality": 0.25,
+    "garp": 0.05,
+    "quality": 0.225,
     "balance_sheet": 0.1,
     "momentum": 0.1,
-    "low_volatility": 0.075,
-    "capital_discipline": 0.125
+    "low_volatility": 0.05,
+    "capital_discipline": 0.1
   },
   "old_thresholds": {
-    "composite_min": 58.6,
-    "bargain_min": 50.1,
+    "composite_min": 58.9,
+    "bargain_min": 49.5,
     "coverage_min_pct": 70.0,
     "altman_z_min": 1.8,
+    "altman_zpp_min": 1.1,
+    "uncertainty_medium_bump": 3.0,
+    "uncertainty_high_bump": 6.0,
+    "uncertainty_coverage_max": 80.0,
+    "uncertainty_vol_min": 0.35,
+    "uncertainty_dispersion_min": 0.4,
+    "short_interest_days_min": 5.0,
+    "short_interest_float_pct_min": 0.1,
     "implied_upside_min_pct": 15.0,
     "exclude_sell_consensus": true,
+    "exclude_underperform": true,
     "require_implied_upside": false
   },
   "new_thresholds": {
-    "composite_min": 58.55500325919987,
-    "bargain_min": 50.145553742222454,
+    "composite_min": 50.0,
+    "bargain_min": 50.0,
     "coverage_min_pct": 70.0,
     "altman_z_min": 1.8,
+    "altman_zpp_min": 1.1,
+    "uncertainty_medium_bump": 3.0,
+    "uncertainty_high_bump": 6.0,
+    "uncertainty_coverage_max": 80.0,
+    "uncertainty_vol_min": 0.35,
+    "uncertainty_dispersion_min": 0.4,
+    "short_interest_days_min": 5.0,
+    "short_interest_float_pct_min": 0.1,
     "implied_upside_min_pct": 15.0,
     "exclude_sell_consensus": true,
+    "exclude_underperform": true,
     "require_implied_upside": false
   },
   "buy_and_hold": {
     "old": {
       "strategy": "buy_and_hold",
-      "terminal_wealth": 6317571.010329845,
-      "total_invested": 1300000.0,
-      "total_return": 3.8596700079460353,
-      "cagr": 0.10385727377939591,
-      "max_drawdown": -0.23414219604725206,
+      "terminal_wealth": 304276.9223098834,
+      "total_invested": 240000.0,
+      "total_return": 0.2678205096245141,
+      "cagr": 0.08997703440849025,
+      "max_drawdown": 0.0,
       "period_start": "2010-03-31 00:00:00",
-      "period_end": "2026-03-31 00:00:00",
-      "quarters_invested": 65,
+      "period_end": "2012-12-31 00:00:00",
+      "quarters_invested": 12,
       "holdings_log": [
         {
           "quarter_end": "2010-03-31 00:00:00",
           "bought": [
-            "BRK-B",
-            "SHW",
-            "PRU",
-            "KSS",
-            "NKE"
+            "CF",
+            "GME",
+            "CNX",
+            "WDC"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-06-30 00:00:00",
           "bought": [
-            "IFF",
-            "AAPL",
-            "MA",
-            "NKE",
-            "HPQ"
+            "BEN",
+            "VFC",
+            "EL",
+            "COP",
+            "APA"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-09-30 00:00:00",
           "bought": [
-            "FAST",
-            "CAG",
-            "HPQ",
-            "DTE",
-            "AAPL"
+            "INTC",
+            "MSFT",
+            "XOM",
+            "GILD",
+            "ISRG"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-12-31 00:00:00",
           "bought": [
-            "ROST",
-            "TXN",
-            "BRK-B",
-            "SHW",
-            "DTE"
+            "GILD",
+            "ISRG",
+            "V",
+            "BBY",
+            "LMT"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-03-31 00:00:00",
           "bought": [
-            "SHW",
-            "CINF",
+            "NKE",
             "MCHP",
-            "SRE",
-            "PSA"
+            "MSFT",
+            "UNP",
+            "LLY"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-06-30 00:00:00",
           "bought": [
-            "L",
-            "TXN",
-            "BEN",
-            "NKE",
-            "CPB"
+            "CVX",
+            "MCHP",
+            "LLY",
+            "MSFT",
+            "UNP"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-09-30 00:00:00",
           "bought": [
-            "SO",
-            "AAPL",
-            "NKE",
-            "HRL",
-            "T"
+            "BKNG",
+            "XOM",
+            "OXY",
+            "MCHP",
+            "CI"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-12-31 00:00:00",
           "bought": [
-            "SHW",
-            "DLTR",
-            "OKE",
-            "TRV",
-            "ROST"
+            "BKNG",
+            "CI",
+            "JCI",
+            "PH",
+            "BEN"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-03-31 00:00:00",
           "bought": [
-            "ORLY",
-            "EFX",
-            "NKE",
-            "ABT",
-            "D"
+            "AIZ",
+            "FDX",
+            "CF",
+            "WELL",
+            "ORCL"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-06-30 00:00:00",
           "bought": [
-            "SO",
-            "CTAS",
-            "V",
-            "NKE",
-            "CPB"
+            "QCOM",
+            "ORLY",
+            "CF",
+            "FDX",
+            "BEN"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-09-30 00:00:00",
           "bought": [
-            "SO",
-            "V",
-            "NOC",
-            "DUK",
-            "FISV"
+            "CF",
+            "UNP",
+            "ISRG",
+            "NEE",
+            "FDX"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-12-31 00:00:00",
           "bought": [
+            "CF",
+            "BRK-B",
+            "AIV",
             "AAPL",
-            "COP",
-            "V",
-            "SHW",
-            "PCAR"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-03-31 00:00:00",
-          "bought": [
-            "PNC",
-            "BRK-B",
-            "NOC",
-            "LDOS",
-            "WMT"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-06-30 00:00:00",
-          "bought": [
-            "ACN",
-            "MOS",
-            "PPL",
-            "NKE",
-            "V"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-09-30 00:00:00",
-          "bought": [
-            "BRK-B",
-            "ORLY",
-            "ACN",
-            "V",
-            "KIM"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-12-31 00:00:00",
-          "bought": [
-            "EQR",
-            "ORLY",
-            "CMS",
-            "MA",
-            "HPQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-03-31 00:00:00",
-          "bought": [
-            "SYK",
-            "OXY",
-            "WMT",
-            "SO",
-            "NVDA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-06-30 00:00:00",
-          "bought": [
-            "DUK",
-            "AFL",
-            "NKE",
-            "BRK-B",
-            "SYK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-09-30 00:00:00",
-          "bought": [
-            "AMT",
-            "TAP",
-            "BAX",
-            "PPG",
-            "SYK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-12-31 00:00:00",
-          "bought": [
-            "AIV",
-            "BAX",
-            "BRK-B",
-            "HPQ",
-            "ORLY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-03-31 00:00:00",
-          "bought": [
-            "ALL",
-            "ACN",
-            "DUK",
-            "GS",
-            "VLO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-06-30 00:00:00",
-          "bought": [
-            "ACN",
-            "BRK-B",
-            "L",
-            "SO",
-            "RL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-09-30 00:00:00",
-          "bought": [
-            "ACN",
-            "TPR",
-            "L",
-            "HIG",
-            "DUK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-12-31 00:00:00",
-          "bought": [
-            "ORLY",
-            "ACN",
-            "COP",
-            "BRK-B",
-            "AIV"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-03-31 00:00:00",
-          "bought": [
-            "MA",
-            "ISRG",
-            "TSCO",
-            "SO",
-            "CMCSA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-06-30 00:00:00",
-          "bought": [
-            "ACN",
-            "CTAS",
-            "SO",
-            "VLO",
-            "PRU"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-09-30 00:00:00",
-          "bought": [
-            "MA",
-            "ACN",
-            "CAH",
-            "F",
-            "DUK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-12-31 00:00:00",
-          "bought": [
-            "BRK-B",
-            "VLO",
-            "SO",
-            "ISRG",
-            "T"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-03-31 00:00:00",
-          "bought": [
-            "NVDA",
-            "KDP",
-            "MOS",
-            "AIV",
-            "NKE"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-06-30 00:00:00",
-          "bought": [
-            "BRK-B",
-            "PSX",
-            "V",
-            "PRU",
-            "LRCX"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-09-30 00:00:00",
-          "bought": [
-            "CMCSA",
-            "F",
-            "EQR",
-            "PPL",
-            "PRU"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-12-31 00:00:00",
-          "bought": [
-            "EQR",
-            "BRK-B",
-            "MA",
-            "PRU",
-            "HSY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-03-31 00:00:00",
-          "bought": [
-            "GRMN",
-            "ACN",
-            "MA",
-            "FISV",
-            "ES"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-06-30 00:00:00",
-          "bought": [
-            "ACN",
-            "V",
-            "KO",
-            "ROK",
-            "VFC"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-09-30 00:00:00",
-          "bought": [
-            "ACN",
-            "F",
-            "DUK",
-            "COO",
-            "D"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-12-31 00:00:00",
-          "bought": [
-            "KO",
-            "AIV",
-            "ACN",
-            "ROL",
-            "VLO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-03-31 00:00:00",
-          "bought": [
-            "NEE",
-            "F",
-            "ALL",
-            "UHS",
-            "AEP"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-06-30 00:00:00",
-          "bought": [
-            "ACN",
-            "KO",
-            "AIV",
-            "V",
-            "DUK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-09-30 00:00:00",
-          "bought": [
-            "HSY",
-            "ACN",
-            "ES",
-            "PCAR",
-            "ABT"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-12-31 00:00:00",
-          "bought": [
-            "WRB",
-            "CMG",
-            "ODFL",
-            "ACN",
-            "V"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-03-31 00:00:00",
-          "bought": [
-            "COP",
-            "ACN",
-            "IDXX",
-            "RSG",
-            "PCAR"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-06-30 00:00:00",
-          "bought": [
-            "MA",
-            "WM",
-            "MDT",
-            "BRK-B",
-            "AEP"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-09-30 00:00:00",
-          "bought": [
-            "BIO",
-            "CMCSA",
-            "NUE",
-            "AMCR",
-            "ALL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-12-31 00:00:00",
-          "bought": [
-            "MA",
-            "DUK",
-            "NDAQ",
-            "ACN",
-            "AMCR"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-03-31 00:00:00",
-          "bought": [
-            "DUK",
-            "COP",
-            "AMCR",
-            "PRU",
-            "MA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-06-30 00:00:00",
-          "bought": [
-            "MDT",
-            "PRU",
-            "CPRT",
-            "CTVA",
-            "TT"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-09-30 00:00:00",
-          "bought": [
-            "CPRT",
-            "AVGO",
-            "V",
-            "TEL",
-            "ES"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-12-31 00:00:00",
-          "bought": [
-            "ORLY",
-            "AVGO",
-            "SNA",
-            "PRU",
-            "DUK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-03-31 00:00:00",
-          "bought": [
-            "HSY",
-            "ORLY",
-            "APH",
-            "WMT",
-            "AVGO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-06-30 00:00:00",
-          "bought": [
-            "MDT",
-            "PG",
-            "AVGO",
-            "DUK",
-            "FOX"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-09-30 00:00:00",
-          "bought": [
-            "AMCR",
-            "CPB",
-            "FOX",
-            "HSIC",
-            "BRK-B"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-12-31 00:00:00",
-          "bought": [
-            "HSY",
-            "AMCR",
-            "DOW",
-            "PRU",
-            "AVGO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-03-31 00:00:00",
-          "bought": [
-            "VZ",
-            "ACGL",
-            "DOW",
-            "AEP",
-            "PRU"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-06-30 00:00:00",
-          "bought": [
-            "SJM",
-            "CTAS",
-            "CBOE",
-            "V",
-            "EA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-09-30 00:00:00",
-          "bought": [
-            "V",
-            "KIM",
-            "AMCR",
-            "CNP",
-            "LRCX"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-12-31 00:00:00",
-          "bought": [
-            "SNA",
-            "CMG",
-            "HSY",
-            "REGN",
-            "LKQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-03-31 00:00:00",
-          "bought": [
-            "SO",
-            "MCD",
-            "ACN",
-            "BRK-B",
-            "DUK"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-06-30 00:00:00",
-          "bought": [
-            "CNP",
-            "AMCR",
-            "CMCSA",
-            "MCD",
-            "V"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-09-30 00:00:00",
-          "bought": [
-            "DUK",
-            "AMCR",
-            "PRU",
-            "MCD",
-            "LRCX"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-12-31 00:00:00",
-          "bought": [
-            "ORLY",
-            "REGN",
-            "HPQ",
-            "MCD",
-            "CL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-03-31 00:00:00",
-          "bought": [
-            "MCD",
-            "BRK-B",
-            "KIM",
-            "CTSH",
-            "CME"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-06-30 00:00:00",
-          "bought": [
-            "PG",
-            "MCD",
-            "CMCSA",
-            "AMCR",
-            "ETR"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-09-30 00:00:00",
-          "bought": [
-            "BR",
-            "SYY",
-            "DUK",
-            "V",
-            "CMCSA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-12-31 00:00:00",
-          "bought": [
-            "MCD",
-            "BKNG",
-            "HSY",
-            "PHM",
-            "HPQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2026-03-31 00:00:00",
-          "bought": [
-            "MCD",
-            "HSY",
-            "LDOS",
-            "HPQ",
-            "GOOG"
+            "WEC"
           ],
           "invested": 20000.0
         }
@@ -776,727 +606,144 @@
     },
     "new": {
       "strategy": "buy_and_hold",
-      "terminal_wealth": 9297724.325670712,
-      "total_invested": 1300000.0,
-      "total_return": 6.1520956351313165,
-      "cagr": 0.1308423959134859,
-      "max_drawdown": -0.26061563995289894,
+      "terminal_wealth": 276364.8372835108,
+      "total_invested": 240000.0,
+      "total_return": 0.15152015534796148,
+      "cagr": 0.05255780422481937,
+      "max_drawdown": -0.01223107998089945,
       "period_start": "2010-03-31 00:00:00",
-      "period_end": "2026-03-31 00:00:00",
-      "quarters_invested": 65,
+      "period_end": "2012-12-31 00:00:00",
+      "quarters_invested": 12,
       "holdings_log": [
         {
           "quarter_end": "2010-03-31 00:00:00",
           "bought": [
-            "PRU",
-            "BRK-B",
-            "KSS",
+            "WDC",
             "NRG",
-            "OMC"
+            "EP",
+            "HP",
+            "AIG"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-06-30 00:00:00",
           "bought": [
-            "FAST",
-            "BEN",
-            "AAPL",
-            "IFF",
-            "C"
+            "EL",
+            "ISRG",
+            "SWK",
+            "LEG",
+            "VFC"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-09-30 00:00:00",
           "bought": [
-            "DTE",
-            "FAST",
-            "CAG",
-            "NI",
-            "ISRG"
+            "ISRG",
+            "INTC",
+            "ZION",
+            "TIE",
+            "ITT"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2010-12-31 00:00:00",
           "bought": [
-            "ROST",
-            "BRK-B",
-            "FISV",
-            "FAST",
-            "HRL"
+            "ZION",
+            "ISRG",
+            "TIE",
+            "MEE",
+            "GR"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-03-31 00:00:00",
           "bought": [
-            "NFLX",
-            "CINF",
-            "CF",
-            "PRU",
-            "ES"
+            "NKE",
+            "MCHP",
+            "INTC",
+            "ETR",
+            "JCI"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-06-30 00:00:00",
           "bought": [
-            "L",
-            "NKE",
+            "CVX",
+            "TER",
             "TXN",
-            "COP",
-            "BEN"
+            "MCHP",
+            "ANDV"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-09-30 00:00:00",
           "bought": [
-            "SO",
-            "ISRG",
-            "AAPL",
-            "CSX",
-            "ORLY"
+            "BKNG",
+            "CI",
+            "EW",
+            "AET",
+            "TER"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2011-12-31 00:00:00",
           "bought": [
-            "INTC",
-            "ALL",
-            "EXPE",
-            "HPQ",
-            "PGR"
+            "BKNG",
+            "CI",
+            "CVX",
+            "JCI",
+            "MPC"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-03-31 00:00:00",
           "bought": [
-            "ORLY",
-            "SO",
-            "ABT",
-            "NUE",
-            "MCHP"
+            "CF",
+            "UNP",
+            "MRK",
+            "AIZ",
+            "COP"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-06-30 00:00:00",
           "bought": [
-            "CTAS",
-            "V",
-            "SO",
-            "CPB",
-            "CAH"
+            "CF",
+            "ORLY",
+            "NDAQ",
+            "AIV",
+            "COP"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-09-30 00:00:00",
           "bought": [
-            "SO",
-            "MNST",
-            "DUK",
-            "ORLY",
-            "V"
+            "CF",
+            "NOC",
+            "UNP",
+            "NDAQ",
+            "ORLY"
           ],
           "invested": 20000.0
         },
         {
           "quarter_end": "2012-12-31 00:00:00",
           "bought": [
+            "CF",
             "AAPL",
-            "ISRG",
-            "PCAR",
-            "ORLY",
-            "ITW"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-03-31 00:00:00",
-          "bought": [
-            "PNC",
-            "MCHP",
-            "BRK-B",
-            "SYK",
-            "NDAQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-06-30 00:00:00",
-          "bought": [
-            "STZ",
-            "D",
-            "WDC",
-            "PPL",
-            "HPQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-09-30 00:00:00",
-          "bought": [
-            "BRK-B",
-            "SLM",
-            "ORLY",
-            "BKNG",
-            "SYY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2013-12-31 00:00:00",
-          "bought": [
-            "PNC",
-            "HPQ",
-            "AAPL",
-            "ETR",
+            "AIV",
+            "NOC",
             "ISRG"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-03-31 00:00:00",
-          "bought": [
-            "SYK",
-            "NEE",
-            "SO",
-            "NVDA",
-            "OXY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-06-30 00:00:00",
-          "bought": [
-            "AAPL",
-            "WDC",
-            "V",
-            "LRCX",
-            "HPQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-09-30 00:00:00",
-          "bought": [
-            "AMT",
-            "HPQ",
-            "EOG",
-            "DOV",
-            "V"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2014-12-31 00:00:00",
-          "bought": [
-            "AIV",
-            "HPQ",
-            "ORLY",
-            "BAX",
-            "NVDA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-03-31 00:00:00",
-          "bought": [
-            "VLO",
-            "NI",
-            "ES",
-            "GS",
-            "ALL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-06-30 00:00:00",
-          "bought": [
-            "BRK-B",
-            "GS",
-            "L",
-            "LRCX",
-            "ORLY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-09-30 00:00:00",
-          "bought": [
-            "REGN",
-            "SEE",
-            "HIG",
-            "SO",
-            "EMN"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2015-12-31 00:00:00",
-          "bought": [
-            "ORLY",
-            "HPQ",
-            "NVDA",
-            "COP",
-            "AFL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-03-31 00:00:00",
-          "bought": [
-            "VRSN",
-            "LRCX",
-            "ISRG",
-            "MCO",
-            "NEE"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-06-30 00:00:00",
-          "bought": [
-            "PRU",
-            "CMS",
-            "CTAS",
-            "PNC",
-            "VLO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-09-30 00:00:00",
-          "bought": [
-            "MA",
-            "ORLY",
-            "ISRG",
-            "PNC",
-            "CAH"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2016-12-31 00:00:00",
-          "bought": [
-            "VLO",
-            "ISRG",
-            "BRK-B",
-            "ORLY",
-            "SO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-03-31 00:00:00",
-          "bought": [
-            "NVDA",
-            "MOS",
-            "PRU",
-            "ALL",
-            "ITW"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-06-30 00:00:00",
-          "bought": [
-            "BRK-B",
-            "PRU",
-            "FE",
-            "V",
-            "RL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-09-30 00:00:00",
-          "bought": [
-            "AFL",
-            "PRU",
-            "PPL",
-            "F",
-            "CMCSA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2017-12-31 00:00:00",
-          "bought": [
-            "BHF",
-            "PRU",
-            "BRK-B",
-            "SO",
-            "LYB"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-03-31 00:00:00",
-          "bought": [
-            "MA",
-            "FMC",
-            "LNC",
-            "UHS",
-            "TSCO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-06-30 00:00:00",
-          "bought": [
-            "NEE",
-            "KO",
-            "AAPL",
-            "VFC",
-            "BF-B"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-09-30 00:00:00",
-          "bought": [
-            "COO",
-            "D",
-            "PRU",
-            "CPRT",
-            "SPG"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2018-12-31 00:00:00",
-          "bought": [
-            "KO",
-            "AIV",
-            "V",
-            "ORLY",
-            "HAS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-03-31 00:00:00",
-          "bought": [
-            "TSCO",
-            "UHS",
-            "PFE",
-            "F",
-            "NDAQ"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-06-30 00:00:00",
-          "bought": [
-            "LRCX",
-            "MA",
-            "KO",
-            "ETR",
-            "PRU"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-09-30 00:00:00",
-          "bought": [
-            "HSY",
-            "PCAR",
-            "ETR",
-            "ACN",
-            "CSX"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2019-12-31 00:00:00",
-          "bought": [
-            "CMG",
-            "WRB",
-            "V",
-            "ODFL",
-            "T"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-03-31 00:00:00",
-          "bought": [
-            "COP",
-            "LRCX",
-            "WMT",
-            "PRU",
-            "UHS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-06-30 00:00:00",
-          "bought": [
-            "WM",
-            "LRCX",
-            "PRU",
-            "AEP",
-            "AMT"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-09-30 00:00:00",
-          "bought": [
-            "CMCSA",
-            "TSCO",
-            "CTAS",
-            "CSX",
-            "NUE"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2020-12-31 00:00:00",
-          "bought": [
-            "MA",
-            "DUK",
-            "NEE",
-            "RJF",
-            "MET"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-03-31 00:00:00",
-          "bought": [
-            "COP",
-            "ABT",
-            "ESS",
-            "PRU",
-            "WRB"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-06-30 00:00:00",
-          "bought": [
-            "PRU",
-            "MDT",
-            "LNT",
-            "CTVA",
-            "FOXA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-09-30 00:00:00",
-          "bought": [
-            "PFG",
-            "KEYS",
-            "NWSA",
-            "CPRT",
-            "CMCSA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2021-12-31 00:00:00",
-          "bought": [
-            "PRU",
-            "PEG",
-            "VNO",
-            "AVGO",
-            "SNA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-03-31 00:00:00",
-          "bought": [
-            "HSY",
-            "ORLY",
-            "F",
-            "ALL",
-            "WMT"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-06-30 00:00:00",
-          "bought": [
-            "AVGO",
-            "SJM",
-            "QRVO",
-            "REGN",
-            "FOXA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-09-30 00:00:00",
-          "bought": [
-            "LMT",
-            "FOX",
-            "REG",
-            "CAG",
-            "CTAS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2022-12-31 00:00:00",
-          "bought": [
-            "DOW",
-            "FOX",
-            "PRU",
-            "TSN",
-            "HSY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-03-31 00:00:00",
-          "bought": [
-            "PRU",
-            "AEP",
-            "GS",
-            "VZ",
-            "ACGL"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-06-30 00:00:00",
-          "bought": [
-            "CTAS",
-            "SJM",
-            "LRCX",
-            "AVGO",
-            "V"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-09-30 00:00:00",
-          "bought": [
-            "KIM",
-            "LEN",
-            "SYF",
-            "LRCX",
-            "GM"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2023-12-31 00:00:00",
-          "bought": [
-            "TAP",
-            "CMG",
-            "HSY",
-            "REGN",
-            "COO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-03-31 00:00:00",
-          "bought": [
-            "COF",
-            "KVUE",
-            "SO",
-            "BKNG",
-            "AVGO"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-06-30 00:00:00",
-          "bought": [
-            "CNP",
-            "LRCX",
-            "AEP",
-            "NWSA",
-            "ESS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-09-30 00:00:00",
-          "bought": [
-            "DUK",
-            "LRCX",
-            "PRU",
-            "CNC",
-            "VTRS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2024-12-31 00:00:00",
-          "bought": [
-            "DVA",
-            "TSCO",
-            "CL",
-            "TAP",
-            "CTVA"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-03-31 00:00:00",
-          "bought": [
-            "DOW",
-            "KIM",
-            "AEP",
-            "UHS",
-            "ACN"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-06-30 00:00:00",
-          "bought": [
-            "ETR",
-            "PRU",
-            "CMCSA",
-            "SYF",
-            "PCAR"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-09-30 00:00:00",
-          "bought": [
-            "BR",
-            "V",
-            "DPZ",
-            "SYY",
-            "CMS"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2025-12-31 00:00:00",
-          "bought": [
-            "PRU",
-            "PHM",
-            "HPQ",
-            "RSG",
-            "HSY"
-          ],
-          "invested": 20000.0
-        },
-        {
-          "quarter_end": "2026-03-31 00:00:00",
-          "bought": [
-            "GOOG",
-            "PRU",
-            "TROW",
-            "PHM",
-            "HSY"
           ],
           "invested": 20000.0
         }
@@ -1504,14 +751,14 @@
     },
     "spy": {
       "strategy": "spy_benchmark",
-      "terminal_wealth": 4326313.056401367,
-      "total_invested": 1300000.0,
-      "total_return": 2.327933120308744,
-      "cagr": 0.0780425728734957,
-      "max_drawdown": -0.21864822644953974,
+      "terminal_wealth": 279866.0286668184,
+      "total_invested": 240000.0,
+      "total_return": 0.16610845277841002,
+      "cagr": 0.05737980864279457,
+      "max_drawdown": 0.0,
       "period_start": "2010-03-31 00:00:00",
-      "period_end": "2026-03-31 00:00:00",
-      "quarters_invested": 65,
+      "period_end": "2012-12-31 00:00:00",
+      "quarters_invested": 12,
       "holdings_log": [
         {
           "quarter_end": "2010-03-31 00:00:00",
@@ -1620,483 +867,6 @@
           "invested": 20000.0,
           "price": 113.38561248779297,
           "shares_added": 176.2130092314051
-        },
-        {
-          "quarter_end": "2013-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 125.29412841796875,
-          "shares_added": 159.4649344889381
-        },
-        {
-          "quarter_end": "2013-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 128.971923828125,
-          "shares_added": 154.91759281381616
-        },
-        {
-          "quarter_end": "2013-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 135.73240661621094,
-          "shares_added": 147.2015451440003
-        },
-        {
-          "quarter_end": "2013-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 150.01800537109375,
-          "shares_added": 133.18414633360962
-        },
-        {
-          "quarter_end": "2014-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 152.57286071777344,
-          "shares_added": 130.9539579059127
-        },
-        {
-          "quarter_end": "2014-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 160.44412231445312,
-          "shares_added": 124.529460423993
-        },
-        {
-          "quarter_end": "2014-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 162.26473999023438,
-          "shares_added": 123.13223428098087
-        },
-        {
-          "quarter_end": "2014-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 170.21609497070312,
-          "shares_added": 117.38032166381714
-        },
-        {
-          "quarter_end": "2015-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 171.7162628173828,
-          "shares_added": 116.35484986805459
-        },
-        {
-          "quarter_end": "2015-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 172.06668090820312,
-          "shares_added": 116.11789031183348
-        },
-        {
-          "quarter_end": "2015-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 161.01315307617188,
-          "shares_added": 124.08936536115074
-        },
-        {
-          "quarter_end": "2015-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 172.3170623779297,
-          "shares_added": 115.94916779743697
-        },
-        {
-          "quarter_end": "2016-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 174.6076202392578,
-          "shares_added": 114.42811002545113
-        },
-        {
-          "quarter_end": "2016-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 178.89756774902344,
-          "shares_added": 111.68413428655488
-        },
-        {
-          "quarter_end": "2016-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 185.6549530029297,
-          "shares_added": 107.6191055333961
-        },
-        {
-          "quarter_end": "2016-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 192.99148559570312,
-          "shares_added": 103.52798683500485
-        },
-        {
-          "quarter_end": "2017-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 204.41880798339844,
-          "shares_added": 97.74061485400418
-        },
-        {
-          "quarter_end": "2017-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 210.69615173339844,
-          "shares_added": 94.82859471159888
-        },
-        {
-          "quarter_end": "2017-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 219.9995880126953,
-          "shares_added": 90.81844270938822
-        },
-        {
-          "quarter_end": "2017-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 234.88107299804688,
-          "shares_added": 85.06441036305264
-        },
-        {
-          "quarter_end": "2018-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 232.5433349609375,
-          "shares_added": 85.91955552446262
-        },
-        {
-          "quarter_end": "2018-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 240.80418395996094,
-          "shares_added": 82.97206324015576
-        },
-        {
-          "quarter_end": "2018-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 259.2283630371094,
-          "shares_added": 77.0749764645151
-        },
-        {
-          "quarter_end": "2018-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 224.1493377685547,
-          "shares_added": 89.13709127550645
-        },
-        {
-          "quarter_end": "2019-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 254.46792602539062,
-          "shares_added": 78.51685000971946
-        },
-        {
-          "quarter_end": "2019-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 265.22845458984375,
-          "shares_added": 75.33135918963751
-        },
-        {
-          "quarter_end": "2019-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 269.88165283203125,
-          "shares_added": 74.03252414663079
-        },
-        {
-          "quarter_end": "2019-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 294.137451171875,
-          "shares_added": 67.92749410324136
-        },
-        {
-          "quarter_end": "2020-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 236.93447875976562,
-          "shares_added": 84.32719494691304
-        },
-        {
-          "quarter_end": "2020-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 284.7046813964844,
-          "shares_added": 70.17805215571948
-        },
-        {
-          "quarter_end": "2020-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 310.43719482421875,
-          "shares_added": 64.36090878650487
-        },
-        {
-          "quarter_end": "2020-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 348.05755615234375,
-          "shares_added": 57.404356339486526
-        },
-        {
-          "quarter_end": "2021-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 370.16546630859375,
-          "shares_added": 53.97591563380294
-        },
-        {
-          "quarter_end": "2021-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 401.1087341308594,
-          "shares_added": 49.81197934598357
-        },
-        {
-          "quarter_end": "2021-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 403.408935546875,
-          "shares_added": 49.527955926247344
-        },
-        {
-          "quarter_end": "2021-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 448.0502014160156,
-          "shares_added": 44.59326190876653
-        },
-        {
-          "quarter_end": "2022-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 427.37506103515625,
-          "shares_added": 46.75055191949164
-        },
-        {
-          "quarter_end": "2022-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 358.5238037109375,
-          "shares_added": 55.7285730353598
-        },
-        {
-          "quarter_end": "2022-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 340.8444519042969,
-          "shares_added": 58.619173257454165
-        },
-        {
-          "quarter_end": "2022-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 366.615478515625,
-          "shares_added": 54.498571803122715
-        },
-        {
-          "quarter_end": "2023-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 393.95843505859375,
-          "shares_added": 50.71606088862735
-        },
-        {
-          "quarter_end": "2023-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 428.15545654296875,
-          "shares_added": 46.665340064432485
-        },
-        {
-          "quarter_end": "2023-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 414.35101318359375,
-          "shares_added": 48.2200340877822
-        },
-        {
-          "quarter_end": "2023-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 462.5799865722656,
-          "shares_added": 43.192573306235424
-        },
-        {
-          "quarter_end": "2024-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 510.6424560546875,
-          "shares_added": 39.12722051039213
-        },
-        {
-          "quarter_end": "2024-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 533.0040283203125,
-          "shares_added": 37.48568288120488
-        },
-        {
-          "quarter_end": "2024-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 563.6588134765625,
-          "shares_added": 35.44701067794227
-        },
-        {
-          "quarter_end": "2024-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 577.6997680664062,
-          "shares_added": 34.58547343180392
-        },
-        {
-          "quarter_end": "2025-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 553.050048828125,
-          "shares_added": 36.12696540278095
-        },
-        {
-          "quarter_end": "2025-06-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 612.6533813476562,
-          "shares_added": 32.61227406607933
-        },
-        {
-          "quarter_end": "2025-09-30 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 662.4082641601562,
-          "shares_added": 30.162697328892683
-        },
-        {
-          "quarter_end": "2025-12-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 680.062744140625,
-          "shares_added": 29.379671437917303
-        },
-        {
-          "quarter_end": "2026-03-31 00:00:00",
-          "bought": [
-            "SPY"
-          ],
-          "invested": 20000.0,
-          "price": 650.3400268554688,
-          "shares_added": 30.722420818271935
         }
       ]
     }
@@ -2104,77 +874,34 @@
   "comparison_vs_spy": {
     "old_vs_spy": {
       "label": "old_vs_spy",
-      "terminal_wealth_delta": 1991257.953928478,
-      "terminal_wealth_delta_pct": 0.46026672780467,
-      "total_return_delta": 1.5317368876372912,
-      "cagr_delta": 0.025814700905900212,
+      "terminal_wealth_delta": 24410.893643065006,
+      "terminal_wealth_delta_pct": 0.08722349675432123,
+      "total_return_delta": 0.10171205684610407,
+      "cagr_delta": 0.03259722576569568,
       "beat_benchmark": true,
       "beat_on_roi": true,
       "beat_on_wealth": true
     },
     "new_vs_spy": {
       "label": "new_vs_spy",
-      "terminal_wealth_delta": 4971411.269269344,
-      "terminal_wealth_delta_pct": 1.1491103867098722,
-      "total_return_delta": 3.8241625148225724,
-      "cagr_delta": 0.0527998230399902,
-      "beat_benchmark": true,
-      "beat_on_roi": true,
-      "beat_on_wealth": true
+      "terminal_wealth_delta": -3501.191383307625,
+      "terminal_wealth_delta_pct": -0.012510240703332405,
+      "total_return_delta": -0.014588297430448538,
+      "cagr_delta": -0.004822004417975201,
+      "beat_benchmark": false,
+      "beat_on_roi": false,
+      "beat_on_wealth": false
     },
     "new_vs_old": {
       "label": "new_vs_old",
-      "terminal_wealth_delta": 2980153.3153408663,
-      "terminal_wealth_delta_pct": 0.471724545789517,
-      "total_return_delta": 2.292425627185281,
-      "cagr_delta": 0.02698512213408999,
-      "beat_benchmark": true,
-      "beat_on_roi": true,
-      "beat_on_wealth": true
+      "terminal_wealth_delta": -27912.08502637263,
+      "terminal_wealth_delta_pct": -0.09173250739649012,
+      "total_return_delta": -0.11630035427655261,
+      "cagr_delta": -0.03741923018367088,
+      "beat_benchmark": false,
+      "beat_on_roi": false,
+      "beat_on_wealth": false
     }
   },
-  "survivorship_sensitivity": [
-    {
-      "delist_return": 0.0,
-      "old_terminal_wealth": 6317571.010329845,
-      "new_terminal_wealth": 9297724.325670712,
-      "spy_terminal_wealth": 4326313.056401367,
-      "old_total_return": 3.8596700079460353,
-      "new_total_return": 6.1520956351313165,
-      "spy_total_return": 2.327933120308744,
-      "old_cagr": 0.10385727377939591,
-      "new_cagr": 0.1308423959134859,
-      "spy_cagr": 0.0780425728734957,
-      "old_vs_spy_wealth_delta": 1991257.953928478,
-      "new_vs_spy_wealth_delta": 4971411.269269344
-    },
-    {
-      "delist_return": -0.5,
-      "old_terminal_wealth": 6317571.010329845,
-      "new_terminal_wealth": 9297724.325670712,
-      "spy_terminal_wealth": 4326313.056401367,
-      "old_total_return": 3.8596700079460353,
-      "new_total_return": 6.1520956351313165,
-      "spy_total_return": 2.327933120308744,
-      "old_cagr": 0.10385727377939591,
-      "new_cagr": 0.1308423959134859,
-      "spy_cagr": 0.0780425728734957,
-      "old_vs_spy_wealth_delta": 1991257.953928478,
-      "new_vs_spy_wealth_delta": 4971411.269269344
-    },
-    {
-      "delist_return": -1.0,
-      "old_terminal_wealth": 6317571.010329845,
-      "new_terminal_wealth": 9297724.325670712,
-      "spy_terminal_wealth": 4326313.056401367,
-      "old_total_return": 3.8596700079460353,
-      "new_total_return": 6.1520956351313165,
-      "spy_total_return": 2.327933120308744,
-      "old_cagr": 0.10385727377939591,
-      "new_cagr": 0.1308423959134859,
-      "spy_cagr": 0.0780425728734957,
-      "old_vs_spy_wealth_delta": 1991257.953928478,
-      "new_vs_spy_wealth_delta": 4971411.269269344
-    }
-  ]
+  "run_id": "2026-09-07T06:30:02Z"
 }

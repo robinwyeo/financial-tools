@@ -66,7 +66,7 @@ def _dca_vs_spy_section(dca: dict) -> list[str]:
         f"- Quarters with investment: **{quarters}**",
         f"- Total capital deployed (each strategy): **${invested:,.0f}**",
         "",
-        "### Side-by-side results",
+        "### Side-by-side results (in-sample, survivorship-biased)",
         "",
         "| Metric | Old params | New params | S&P 500 (SPY) |",
         "| --- | ---: | ---: | ---: |",
@@ -196,6 +196,7 @@ def generate_report(output_path: Path | None = None) -> str:
         " delist return assumption.",
         "- Analyst upside is informational (not a hard gate) and not historically backtested.",
         "- Expanding-window folds + bootstrap CIs reduce but do not eliminate path dependence.",
+        "- Scoring uses SIC→sector (SEC submissions) rather than today's live snapshot.",
         "- SEC EDGAR fundamentals are point-in-time by filing date; reporting lags apply.",
         "",
     ]
@@ -208,19 +209,28 @@ def generate_report(output_path: Path | None = None) -> str:
                 f"Recommended: **{comparison.get('recommended', 'n/a')}**",
                 f"Primary horizon: **{comparison.get('primary_horizon', '3y')}**",
                 "",
-                "| Candidate | 3y IC | Excess mean | 95% CI | % folds > 0 |",
-                "| --- | ---: | ---: | ---: | ---: |",
+                "| Candidate | 3y IC | NW t | n windows | Block ROI | 95% CI | % blocks > 0 |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for row in comparison.get("candidates", []):
             ics = row.get("horizon_ics") or {}
+            stats = (row.get("horizon_ic_stats") or {}).get("3y") or {}
             ci = f"[{row.get('excess_ci_low', float('nan')):.2%}, {row.get('excess_ci_high', float('nan')):.2%}]"
+            nw = stats.get("nw_tstat", row.get("nw_tstat"))
+            nwin = stats.get("n_independent_windows", row.get("n_independent_windows"))
+            nw_s = "—" if nw is None or (isinstance(nw, float) and nw != nw) else f"{nw:.2f}"
+            nwin_s = "—" if nwin is None else f"{float(nwin):.1f}"
             lines.append(
-                f"| {row.get('name')} | {ics.get('3y', 0):.3f} | "
+                f"| {row.get('name')} | {ics.get('3y', 0):.3f} | {nw_s} | {nwin_s} | "
                 f"{row.get('excess_mean', 0):.2%} | {ci} | "
                 f"{row.get('frac_folds_positive', 0):.0%} |"
             )
         lines.append("")
+        lines.append(
+            "Block ROI is excess return of the gated DCA campaign inside each "
+            "walk-forward block (≤ 2 years), not 3-year excess."
+        )
         for cmp_row in comparison.get("comparisons", []):
             if cmp_row.get("indistinguishable"):
                 lines.append(
@@ -285,28 +295,101 @@ def generate_report(output_path: Path | None = None) -> str:
 
     if dca:
         lines.extend(_dca_vs_spy_section(dca))
+        cov = dca.get("price_coverage_pct")
         lines.extend(
             [
-                "### Survivorship sensitivity (terminal wealth vs SPY)",
+                "### Survivorship (price coverage of PIT constituents)",
                 "",
-                "| Delist assumption | Old | New | SPY | Old − SPY | New − SPY |",
-                "| --- | ---: | ---: | ---: | ---: | ---: |",
+                (
+                    f"Mean quarter-end price coverage: **{cov:.1%}**."
+                    if cov is not None
+                    else "Price coverage was not computed for this run."
+                ),
+                "",
+                dca.get("delist_note")
+                or "Delist return applies only when a held name loses prices mid-life.",
+                "",
             ]
         )
-        for row in dca.get("survivorship_sensitivity", []):
-            old_delta = row.get("old_vs_spy_wealth_delta")
-            new_delta = row.get("new_vs_spy_wealth_delta")
-            lines.append(
-                f"| {row.get('delist_return', 0):.0%} | "
-                f"${row.get('old_terminal_wealth', 0):,.0f} | "
-                f"${row.get('new_terminal_wealth', 0):,.0f} | "
-                f"${row.get('spy_terminal_wealth', 0):,.0f} | "
-                f"{_fmt_money(old_delta)} | {_fmt_money(new_delta)} |"
-            )
-        lines.append("")
 
     text = "\n".join(lines)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out = output_path or (RESULTS_DIR / "backtest_report.md")
     out.write_text(text, encoding="utf-8")
+    write_readme_evidence(_evidence_block(comparison, dca, thresholds))
     return text
+
+
+EVIDENCE_START = "<!-- evidence:start -->"
+EVIDENCE_END = "<!-- evidence:end -->"
+
+
+def _evidence_block(comparison: dict, dca: dict, thresholds: dict) -> str:
+    lines = [
+        EVIDENCE_START,
+        "",
+        "### What the backtest actually shows",
+        "",
+        "Judge the tool by the **out-of-sample fold statistics**, not by any full-period",
+        "terminal-wealth simulation (those evaluate parameters on the same window used",
+        "to choose them, and free price data excludes delisted tickers entirely, so",
+        "strategy results are survivorship-biased upward).",
+        "",
+    ]
+    if comparison.get("run_id"):
+        lines.append(f"Evidence `run_id`: `{comparison.get('run_id')}`.")
+        lines.append("")
+    if comparison.get("candidates"):
+        lines.extend(
+            [
+                "| Candidate | 3y IC | NW t | n independent windows | Block ROI |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in comparison["candidates"]:
+            ics = row.get("horizon_ics") or {}
+            stats = (row.get("horizon_ic_stats") or {}).get("3y") or {}
+            nw = stats.get("nw_tstat", row.get("nw_tstat"))
+            nwin = stats.get("n_independent_windows", row.get("n_independent_windows"))
+            nw_s = "—" if nw is None or (isinstance(nw, float) and nw != nw) else f"{nw:.2f}"
+            nwin_s = "—" if nwin is None else f"{float(nwin):.1f}"
+            lines.append(
+                f"| {row.get('name')} | {ics.get('3y', 0):.3f} | {nw_s} | {nwin_s} | "
+                f"{row.get('excess_mean', 0):.2%} |"
+            )
+        lines.append("")
+        lines.append(
+            "Block ROI is excess return inside each ≤2y walk-forward block, not 3-year excess."
+        )
+        lines.append("")
+    cov = dca.get("price_coverage_pct")
+    if cov is not None:
+        lines.append(f"Mean PIT constituent price coverage: **{cov:.1%}**.")
+        lines.append("")
+    lines.extend(
+        [
+            "Full-period wealth tables are **in-sample and survivorship-biased**.",
+            "Do not treat them as alpha.",
+            "",
+            EVIDENCE_END,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_readme_evidence(block: str, readme_path: Path | None = None) -> None:
+    from core.config import ROOT
+
+    path = readme_path or (ROOT / "README.md")
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    if EVIDENCE_START in text and EVIDENCE_END in text:
+        before = text.split(EVIDENCE_START)[0]
+        after = text.split(EVIDENCE_END, 1)[1]
+        path.write_text(before + block + after, encoding="utf-8")
+        return
+    # Insert before "## Spot-checking" if markers are missing.
+    needle = "## Spot-checking a snapshot"
+    if needle in text:
+        path.write_text(text.replace(needle, block + "\n\n" + needle), encoding="utf-8")

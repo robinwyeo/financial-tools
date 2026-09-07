@@ -18,3 +18,4 @@ backtest/results/*.log
 .pytest_cache/
 .coverage
 htmlcov/
+data/runs/

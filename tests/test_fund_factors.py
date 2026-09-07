@@ -121,3 +121,37 @@ def test_normalize_fund_yield_units():
     assert normalize_fund_yield({"dividendYield": 1.07}) == pytest.approx(0.0107)
     assert normalize_fund_yield({"dividendYield": 0.012}) == 0.012
     assert normalize_fund_yield({}) is None
+
+
+def test_build_fund_raw_metrics_with_mocks(monkeypatch):
+    import pandas as pd
+
+    from core.data import build_fund_raw_metrics
+
+    idx = pd.date_range("2020-01-01", periods=400, freq="B")
+    hist = pd.DataFrame({"Close": 100 + pd.Series(range(400), index=idx) * 0.05}, index=idx)
+    monkeypatch.setattr(
+        "core.data.fetch_fund_info",
+        lambda ticker: {
+            "name": "Test ETF",
+            "quote_type": "ETF",
+            "category": "Large Blend",
+            "fund_family": "Vanguard",
+            "currency": "USD",
+            "exchange": "NYSE",
+            "current_price": 120.0,
+            "expense_ratio": 0.0003,
+            "yield": 0.015,
+            "total_assets": 1e9,
+            "fifty_two_week_high": 125.0,
+            "fifty_two_week_low": 90.0,
+        },
+    )
+    monkeypatch.setattr("core.data.fetch_price_history", lambda ticker, period="max": hist)
+    raw = build_fund_raw_metrics("VTI")
+    assert raw["ticker"] == "VTI"
+    assert raw["expense_ratio"] == 0.0003
+    assert raw["price"] == 120.0
+    assert raw["return_1y"] is not None
+    assert raw["momentum_12_1"] is not None
+    assert raw["volatility_12m"] is not None

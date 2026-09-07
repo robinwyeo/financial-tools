@@ -1,8 +1,8 @@
 {
   "objective": "gated_dca_expanding_window_with_bootstrap",
   "primary_horizon": "3y",
-  "composite_min": 58.6,
-  "bargain_min": 50.1,
+  "composite_min": 58.9,
+  "bargain_min": 49.5,
   "top_n": 5,
   "candidates": [
     {
@@ -17,55 +17,69 @@
         "capital_discipline": 0.1
       },
       "horizon_ics": {
-        "1q": 0.022838363778684832,
-        "1y": 0.031107309747059428,
-        "3y": 0.06363857658706414,
-        "5y": 0.07396966900439386
+        "1q": 0.022298385765159454,
+        "1y": 0.1394448872011049,
+        "3y": 0.0,
+        "5y": 0.0
       },
-      "primary_ic": 0.06363857658706414,
-      "fold_excess_roi": [
-        0.08086141818558956,
-        -0.001076366458761191,
-        -0.04181729812354362,
-        0.11781364498098812,
-        -0.010282615602541068,
-        -0.033910100218946804
+      "horizon_ic_stats": {
+        "1q": {
+          "mean": 0.022298385765159454,
+          "nw_tstat": 0.677523220043229,
+          "n_quarters": 11,
+          "n_independent_windows": 11.0
+        },
+        "1y": {
+          "mean": 0.1394448872011049,
+          "nw_tstat": 3.321053590933115,
+          "n_quarters": 8,
+          "n_independent_windows": 2.0
+        },
+        "3y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        },
+        "5y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        }
+      },
+      "primary_ic": 0.0,
+      "nw_tstat": NaN,
+      "n_independent_windows": 0.0,
+      "fold_block_roi": [
+        0.0,
+        0.0,
+        -2.220446049250313e-16,
+        2.220446049250313e-16,
+        -2.220446049250313e-16
       ],
-      "excess_mean": 0.0185981137937975,
-      "excess_ci_low": -0.02581776347361438,
-      "excess_ci_high": 0.06987489730326706,
-      "frac_folds_positive": 0.3333333333333333
-    },
-    {
-      "name": "equal",
-      "factor_weights": {
-        "value": 0.125,
-        "garp": 0.125,
-        "quality": 0.125,
-        "balance_sheet": 0.125,
-        "momentum": 0.125,
-        "low_volatility": 0.125,
-        "capital_discipline": 0.125
-      },
-      "horizon_ics": {
-        "1q": 0.020323308275124907,
-        "1y": 0.03803219382141225,
-        "3y": 0.07951464329955311,
-        "5y": 0.09279614801523822
-      },
-      "primary_ic": 0.07951464329955311,
       "fold_excess_roi": [
-        0.007626822216211471,
-        0.03259870012014554,
-        -0.043570014110676514,
-        0.10326495914581746,
-        -0.05153226698688784,
-        -0.04769888100235575
+        0.0,
+        0.0,
+        -2.220446049250313e-16,
+        2.220446049250313e-16,
+        -2.220446049250313e-16
       ],
-      "excess_mean": 0.00011488656370906014,
-      "excess_ci_low": -0.039067581312158706,
-      "excess_ci_high": 0.04691308462653313,
-      "frac_folds_positive": 0.5
+      "excess_mean": -4.4408920985006264e-17,
+      "block_roi_mean": -4.4408920985006264e-17,
+      "excess_ci_low": -1.7763568394002506e-16,
+      "excess_ci_high": 8.881784197001253e-17,
+      "frac_folds_positive": 0.2,
+      "pick_stats_3y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      },
+      "pick_stats_5y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      }
     },
     {
       "name": "legacy_tuned",
@@ -79,35 +93,156 @@
         "capital_discipline": 0.061434210526315786
       },
       "horizon_ics": {
-        "1q": 0.01970506426261118,
-        "1y": 0.035988938307235534,
-        "3y": 0.07031910467737038,
-        "5y": 0.08208416327498211
+        "1q": 0.018931774269536603,
+        "1y": 0.13154890092338994,
+        "3y": 0.0,
+        "5y": 0.0
       },
-      "primary_ic": 0.07031910467737038,
-      "fold_excess_roi": [
-        0.011179292238944427,
-        0.03708047396866809,
-        -0.014910567276823272,
-        0.11228345808599816,
-        -0.10177101333280292,
-        -0.05429261842872268
+      "horizon_ic_stats": {
+        "1q": {
+          "mean": 0.018931774269536603,
+          "nw_tstat": 0.3772153683117986,
+          "n_quarters": 11,
+          "n_independent_windows": 11.0
+        },
+        "1y": {
+          "mean": 0.13154890092338994,
+          "nw_tstat": 2.1536044281513465,
+          "n_quarters": 8,
+          "n_independent_windows": 2.0
+        },
+        "3y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        },
+        "5y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        }
+      },
+      "primary_ic": 0.0,
+      "nw_tstat": NaN,
+      "n_independent_windows": 0.0,
+      "fold_block_roi": [
+        0.0,
+        -2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0
       ],
-      "excess_mean": -0.0017384957907896996,
-      "excess_ci_low": -0.05550520076795993,
-      "excess_ci_high": 0.05348296180019622,
-      "frac_folds_positive": 0.5
+      "fold_excess_roi": [
+        0.0,
+        -2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "excess_mean": -4.4408920985006264e-17,
+      "block_roi_mean": -4.4408920985006264e-17,
+      "excess_ci_low": -1.3322676295501878e-16,
+      "excess_ci_high": 0.0,
+      "frac_folds_positive": 0.0,
+      "pick_stats_3y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      },
+      "pick_stats_5y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      }
+    },
+    {
+      "name": "equal",
+      "factor_weights": {
+        "value": 0.125,
+        "garp": 0.125,
+        "quality": 0.125,
+        "balance_sheet": 0.125,
+        "momentum": 0.125,
+        "low_volatility": 0.125,
+        "capital_discipline": 0.125
+      },
+      "horizon_ics": {
+        "1q": 0.023385665755903586,
+        "1y": 0.15239913788843878,
+        "3y": 0.0,
+        "5y": 0.0
+      },
+      "horizon_ic_stats": {
+        "1q": {
+          "mean": 0.023385665755903586,
+          "nw_tstat": 0.45725377254447214,
+          "n_quarters": 11,
+          "n_independent_windows": 11.0
+        },
+        "1y": {
+          "mean": 0.15239913788843878,
+          "nw_tstat": 2.4683756380572413,
+          "n_quarters": 8,
+          "n_independent_windows": 2.0
+        },
+        "3y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        },
+        "5y": {
+          "mean": 0.0,
+          "nw_tstat": NaN,
+          "n_quarters": 0,
+          "n_independent_windows": 0.0
+        }
+      },
+      "primary_ic": 0.0,
+      "nw_tstat": NaN,
+      "n_independent_windows": 0.0,
+      "fold_block_roi": [
+        0.0,
+        -2.220446049250313e-16,
+        -2.220446049250313e-16,
+        2.220446049250313e-16,
+        -2.220446049250313e-16
+      ],
+      "fold_excess_roi": [
+        0.0,
+        -2.220446049250313e-16,
+        -2.220446049250313e-16,
+        2.220446049250313e-16,
+        -2.220446049250313e-16
+      ],
+      "excess_mean": -8.881784197001253e-17,
+      "block_roi_mean": -8.881784197001253e-17,
+      "excess_ci_low": -2.220446049250313e-16,
+      "excess_ci_high": 8.881784197001253e-17,
+      "frac_folds_positive": 0.2,
+      "pick_stats_3y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      },
+      "pick_stats_5y": {
+        "hit_rate": NaN,
+        "mean_excess": NaN,
+        "n_quarters": 0
+      }
     }
   ],
   "comparisons": [
     {
       "winner": "evidence_based",
-      "challenger": "equal",
+      "challenger": "legacy_tuned",
       "indistinguishable": true
     },
     {
       "winner": "evidence_based",
-      "challenger": "legacy_tuned",
+      "challenger": "equal",
       "indistinguishable": true
     }
   ],
@@ -120,5 +255,7 @@
     "momentum": 0.1,
     "low_volatility": 0.05,
     "capital_discipline": 0.1
-  }
+  },
+  "block_roi_label": "block ROI (<= 2y), not 3-year excess",
+  "run_id": "2026-09-07T06:30:02Z"
 }

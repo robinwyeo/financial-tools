@@ -51,3 +51,29 @@ def test_recommendation_period_shift_downgrade():
     _, upgrades, downgrades = recommendation_period_shift(recs)
     assert downgrades > 0
     assert upgrades == 0
+
+
+def test_recommendation_key_only_fallback():
+    result = aggregate_analyst_data(
+        {"recommendation_key": "buy", "price": 50, "target_mean": 60, "num_analysts": 8}
+    )
+    assert result["consensus_label"] == "Buy"
+    assert result["buy_count"] == 1
+    assert result["implied_upside_pct"] == pytest.approx(20.0)
+
+
+def test_firm_grade_table():
+    recs = pd.DataFrame(
+        [
+            {"firm": "GS", "toGrade": "Overweight", "action": "up", "date": "2026-01-01"},
+            {"firm": "MS", "toGrade": "Hold", "action": "init", "date": "2026-01-02"},
+            {"firm": "JPM", "toGrade": "Sell", "action": "down", "date": "2026-01-03"},
+        ]
+    )
+    result = aggregate_analyst_data({"recommendations": recs, "price": 10, "target_mean": 12})
+    assert result["buy_count"] == 1
+    assert result["hold_count"] == 1
+    assert result["sell_count"] == 1
+    assert result["recent_upgrades"] == 1
+    assert result["recent_downgrades"] == 1
+    assert any(a["firm"] == "GS" for a in result["recent_actions"])

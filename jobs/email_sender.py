@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from typing import Any
 
 from core.config import get_thresholds
+from core.data import currency_symbol
 
 
 def _clean(value: str | None) -> str:
@@ -51,21 +52,50 @@ def email_is_enabled(config: dict[str, Any]) -> bool:
     return bool(email_cfg.get("enabled", False) or os.environ.get("SMTP_PASSWORD"))
 
 
+def _fmt_price(analysis: dict[str, Any]) -> str:
+    price = analysis.get("price")
+    if price is None:
+        return "N/A"
+    try:
+        return f"{currency_symbol(analysis.get('currency'))}{float(price):,.2f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def _fmt_score(value: float | None, *, suffix: str = "") -> str:
     if value is None:
         return "N/A"
     return f"{value:.1f}{suffix}"
 
 
+def _decision_sort_key(result: dict[str, Any]) -> tuple:
+    decision = result.get("decision") or {}
+    label = decision.get("label")
+    if not label:
+        label = "Accumulate" if result.get("is_good_buy") else "Avoid"
+    rank = {"Accumulate": 0, "Watch": 1, "Avoid": 2}.get(label, 3)
+    pct = decision.get("pct_to_buy")
+    # Watch: closer to buy-below (higher pct_to_buy, e.g. -5 before -20).
+    proximity = float(pct) if pct is not None else -999.0
+    return (rank, -proximity, result.get("ticker", ""))
+
+
 def _sort_scorecard_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
-        results,
-        key=lambda r: (
-            not bool(r.get("is_good_buy")),
-            -(float(r.get("composite")) if r.get("composite") is not None else -1),
-            r.get("ticker", ""),
-        ),
-    )
+    return sorted(results, key=_decision_sort_key)
+
+
+def _failed_gate_name(analysis: dict[str, Any]) -> str:
+    decision = analysis.get("decision") or {}
+    for gate in decision.get("gates") or []:
+        if not gate.get("passed", True):
+            return str(gate.get("name") or "")
+    return ""
+
+
+def _fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:+.1f}%"
 
 
 def format_scorecard_email(
@@ -74,31 +104,46 @@ def format_scorecard_email(
     *,
     title: str,
     subtitle: str = "",
+    snapshot_date: str | None = None,
+    run_id: str | None = None,
+    hurdle_rate: float | None = None,
 ) -> tuple[str, str]:
     """Return (subject, html_body) for a full scorecard email."""
     thresholds = get_thresholds(config)
-    buy_count = sum(1 for r in results if r.get("is_good_buy"))
-    subject = f"Stock Metrics: {title} ({buy_count} Buy / {len(results)} total)"
+    buy_count = sum(
+        1
+        for r in results
+        if r.get("is_good_buy") or (r.get("decision") or {}).get("label") == "Accumulate"
+    )
+    subject = f"Stock Metrics: {title} ({buy_count} Accumulate / {len(results)} total)"
 
     rows = []
     for a in _sort_scorecard_results(results):
-        analyst = a.get("analyst", {}) or {}
-        bargain_score = (a.get("bargain") or {}).get("score")
-        upside = analyst.get("implied_upside_pct")
-        is_buy = bool(a.get("is_good_buy"))
-        verdict = "Buy" if is_buy else "Not Buy"
-        verdict_color = "#166534" if is_buy else "#6b7280"
-        verdict_bg = "#dcfce7" if is_buy else "#f3f4f6"
+        decision = a.get("decision") or {}
+        label = decision.get("label") or ("Accumulate" if a.get("is_good_buy") else "Avoid")
+        color = {"Accumulate": "#166534", "Watch": "#92400e", "Avoid": "#6b7280"}.get(label, "#6b7280")
+        bg = {"Accumulate": "#dcfce7", "Watch": "#fef3c7", "Avoid": "#f3f4f6"}.get(label, "#f3f4f6")
+        flags = a.get("value_trap_flags") or decision.get("flags") or []
+        flag_n = sum(1 for f in flags if f.get("triggered"))
+        quality = a.get("quality_percentile")
+        if quality is None:
+            quality = a.get("quality_score")
+        buy_below = decision.get("buy_below_price")
+        why = a.get("why") or _failed_gate_name(a) or (decision.get("timing_context") or {}).get("hint") or ""
+        grade = (a.get("data_quality") or {}).get("grade") or ""
+        buy_below_txt = _fmt_price({**a, "price": buy_below}) if buy_below is not None else "N/A"
 
         rows.append(
             f"<tr>"
             f"<td><b>{a.get('ticker', '')}</b></td>"
-            f"<td>{a.get('name', '')}</td>"
-            f"<td align='right'>{_fmt_score(a.get('composite'))}</td>"
-            f"<td align='right'>{_fmt_score(bargain_score)}</td>"
-            f"<td align='right'>{_fmt_score(upside, suffix='%')}</td>"
-            f"<td align='center' style='background:{verdict_bg};color:{verdict_color};"
-            f"font-weight:700;'>{verdict}</td>"
+            f"<td align='center' style='background:{bg};color:{color};font-weight:700;'>{label}</td>"
+            f"<td align='right'>{_fmt_price(a)}</td>"
+            f"<td align='right'>{buy_below_txt}</td>"
+            f"<td align='right'>{_fmt_pct(decision.get('pct_to_buy'))}</td>"
+            f"<td align='right'>{_fmt_score(quality)}</td>"
+            f"<td align='center'>{flag_n}</td>"
+            f"<td>{why}</td>"
+            f"<td align='center'>{grade}</td>"
             f"</tr>"
         )
 
@@ -106,35 +151,43 @@ def format_scorecard_email(
     table_body = (
         "".join(rows)
         if rows
-        else "<tr><td colspan='6'><i>No tickers scored.</i></td></tr>"
+        else "<tr><td colspan='9'><i>No tickers scored.</i></td></tr>"
     )
+
+    footer_bits = ["Generated by financial-tools."]
+    if snapshot_date:
+        footer_bits.append(f"snapshot {snapshot_date}")
+    if run_id:
+        footer_bits.append(f"run_id {run_id}")
+    if hurdle_rate is not None:
+        footer_bits.append(f"hurdle {100 * float(hurdle_rate):.1f}%")
+    footer = " · ".join(footer_bits)
 
     html = f"""
     <html><body style="font-family:Arial,sans-serif;color:#1f2937;">
     <h2>{title}</h2>
     {subtitle_html}
     <p style="color:#6b7280;font-size:14px;">
-    Buy criteria: composite &ge; {thresholds['composite_min']},
-    bargain &ge; {thresholds['bargain_min']},
-    Altman Z &ge; {thresholds.get('altman_z_min', 1.8)} (no distress),
-    high uncertainty widens both hurdles by
-    {thresholds.get('uncertainty_high_bump', 6):.0f},
-    consensus not Sell.
-    Analyst upside is shown for context (not a hard gate).
+    Intrinsic decision: Accumulate / Watch / Avoid.
+    Buy-below = min(DCF base × (1 − MoS), DCF bear). Grade C and distress block Accumulate.
+    Legacy composite ≥ {thresholds['composite_min']} / bargain ≥ {thresholds['bargain_min']} still shown in dashboard when decision.mode=legacy.
     </p>
-    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:900px;">
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:1100px;">
     <tr style="background:#f9fafb;">
       <th align="left">Ticker</th>
-      <th align="left">Name</th>
-      <th align="right">Composite</th>
-      <th align="right">Bargain</th>
-      <th align="right">Upside</th>
-      <th align="center">Verdict</th>
+      <th align="center">Decision</th>
+      <th align="right">Price</th>
+      <th align="right">Buy-below</th>
+      <th align="right">% to buy</th>
+      <th align="right">Quality</th>
+      <th align="center">Flags</th>
+      <th align="left">Why</th>
+      <th align="center">Grade</th>
     </tr>
     {table_body}
     </table>
     <p style="color:#9ca3af;font-size:12px;margin-top:16px;">
-    <i>Generated by financial-tools.</i>
+    <i>{footer}</i>
     </p>
     </body></html>
     """

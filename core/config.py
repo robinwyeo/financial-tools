@@ -71,9 +71,9 @@ def get_fund_factor_weights(config: dict[str, Any] | None = None) -> dict[str, f
     }
 
 
-# Long-horizon valuation bargain defaults (RSI removed). graham_heavy weights:
-# validated in backtest/results/bargain_tuning_results.json with ~2x the 3y/5y
-# rank IC of the previous 0.40/0.35/0.25 default.
+# Long-horizon valuation bargain defaults (RSI removed). graham_heavy weights
+# (0.55/0.30/0.15) are the live default. The old 0.40/0.35/0.25 mix is registered
+# as bargain candidate `legacy_040_035_025`. Do not cite pre-companyfacts IC.
 _DEFAULT_BARGAIN_WEIGHTS: dict[str, float] = {
     "margin_of_safety": 0.55,
     "valuation_vs_history": 0.30,
@@ -105,6 +105,7 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
         # Hard distress disqualifier: Altman Z below this blocks a Buy outright
         # (1.8 = classic distress-zone boundary). Missing Z never blocks.
         "altman_z_min": float(t.get("altman_z_min", 1.8)),
+        "altman_zpp_min": float(t.get("altman_zpp_min", 1.1)),
         "uncertainty_medium_bump": float(t.get("uncertainty_medium_bump", 3.0)),
         "uncertainty_high_bump": float(t.get("uncertainty_high_bump", 6.0)),
         "uncertainty_coverage_max": float(t.get("uncertainty_coverage_max", 80.0)),
@@ -115,5 +116,135 @@ def get_thresholds(config: dict[str, Any] | None = None) -> dict[str, Any]:
         # Informational only — not used as a hard good-buy gate.
         "implied_upside_min_pct": float(t.get("implied_upside_min_pct", 15)),
         "exclude_sell_consensus": bool(t.get("exclude_sell_consensus", True)),
+        "exclude_underperform": bool(t.get("exclude_underperform", True)),
         "require_implied_upside": bool(t.get("require_implied_upside", False)),
     }
+
+
+_DEFAULT_HURDLE: dict[str, float] = {
+    "floor": 0.08,
+    "erp": 0.045,
+    "fallback_rf": 0.042,
+    "high_uncertainty_bump": 0.01,
+}
+
+_DEFAULT_VALUATION: dict[str, Any] = {
+    "terminal_growth": 0.025,
+    "explicit_years": 10,
+    "fade_start_year": 5,
+    "base_growth_cap": 0.15,
+    "base_growth_floor": 0.0,
+    "bear_growth_multiplier": 0.5,
+    "bear_growth_cap": 0.04,
+    "bear_rate_bump": 0.01,
+    "subtract_sbc": True,
+    "normalization_years": 3,
+    "cyclical_normalization_years": 7,
+    "cyclical_sectors": [
+        "Energy",
+        "Basic Materials",
+        "Industrials",
+        "Consumer Cyclical",
+    ],
+    "cyclical_industries": [
+        "Semiconductors",
+        "Semiconductor Equipment & Materials",
+    ],
+    "min_tax_rate": 0.15,
+    "max_tax_rate": 0.35,
+    "expected_return_growth_cap": 0.06,
+}
+
+_DEFAULT_QUALITY_WEIGHTS: dict[str, float] = {
+    "profitability": 0.30,
+    "earnings_quality": 0.20,
+    "financial_strength": 0.20,
+    "stability": 0.15,
+    "capital_discipline": 0.15,
+}
+
+_DEFAULT_VALUE_TRAP: dict[str, Any] = {
+    "max_flags": 1,
+    "roic_hurdle": 0.08,
+    "revenue_cagr_min": 0.0,
+    "gross_margin_drop_max": 0.05,
+    "interest_coverage_min": 3.0,
+    "share_cagr_max": 0.03,
+    "accruals_max": 0.10,
+    "fcf_conversion_min": 0.50,
+    "net_debt_ebitda_max": 3.5,
+    "net_debt_ebitda_sector_caps": {
+        "Utilities": 6.0,
+        "Real Estate": 7.0,
+        "Communication Services": 4.5,
+        "Energy": 3.0,
+    },
+}
+
+_DEFAULT_DECISION: dict[str, Any] = {
+    "mode": "intrinsic",
+    "required_margin_of_safety": {"Low": 0.20, "Medium": 0.30, "High": 0.40},
+    "min_quality_percentile": 40.0,
+    "max_value_trap_flags": 1,
+    "min_expected_return_over_hurdle": 0.0,
+    "block_on_data_quality_c": True,
+}
+
+
+def get_valuation_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = config or load_config()
+    raw = dict(_DEFAULT_VALUATION)
+    user = cfg.get("valuation") or {}
+    for key, default in _DEFAULT_VALUATION.items():
+        if key == "hurdle":
+            continue
+        raw[key] = user.get(key, default)
+    hurdle_user = user.get("hurdle") or cfg.get("hurdle") or {}
+    hurdle = dict(_DEFAULT_HURDLE)
+    hurdle.update({k: float(hurdle_user[k]) for k in _DEFAULT_HURDLE if k in hurdle_user})
+    raw["hurdle"] = hurdle
+    return raw
+
+
+def get_quality_weights(config: dict[str, Any] | None = None) -> dict[str, float]:
+    cfg = config or load_config()
+    weights = cfg.get("quality_weights") or {}
+    return {
+        k: float(weights.get(k, _DEFAULT_QUALITY_WEIGHTS[k]))
+        for k in _DEFAULT_QUALITY_WEIGHTS
+    }
+
+
+def get_value_trap_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = config or load_config()
+    user = cfg.get("value_trap") or {}
+    out = dict(_DEFAULT_VALUE_TRAP)
+    out.update(user)
+    caps = dict(_DEFAULT_VALUE_TRAP["net_debt_ebitda_sector_caps"])
+    caps.update(user.get("net_debt_ebitda_sector_caps") or {})
+    out["net_debt_ebitda_sector_caps"] = caps
+    return out
+
+
+def get_decision_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = config or load_config()
+    user = cfg.get("decision") or {}
+    out = dict(_DEFAULT_DECISION)
+    out.update(user)
+    mos = dict(_DEFAULT_DECISION["required_margin_of_safety"])
+    mos.update(user.get("required_margin_of_safety") or {})
+    out["required_margin_of_safety"] = {k: float(v) for k, v in mos.items()}
+    out["mode"] = str(out.get("mode") or "intrinsic").lower()
+    return out
+
+
+def get_universe_members(config: dict[str, Any] | None = None) -> list[str]:
+    cfg = config or load_config()
+    members = (cfg.get("universe") or {}).get("members") or ["sp500"]
+    return [str(m).lower() for m in members]
+
+
+def get_provider_names(config: dict[str, Any] | None = None) -> list[str]:
+    cfg = config or load_config()
+    names = (cfg.get("providers") or {}).get("fundamentals") or ["edgar", "yahoo"]
+    return [str(n).lower() for n in names]

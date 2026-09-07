@@ -100,12 +100,15 @@ def test_sidebar_ticker_input_can_change_from_default(monkeypatch):
     at.run()
     assert not at.exception
     assert at.text_input[0].value == "AAPL"
+    assert any("Viewing AAPL" in str(getattr(el, "value", el)) for el in at.caption)
 
-    at.text_input[0].set_value("NVDA").run()
+    at.text_input[0].set_value("NVDA")
+    assert at.button
+    at.button[0].click().run()
     assert not at.exception
-    assert at.text_input[0].value == "NVDA"
-    texts = [str(getattr(el, "value", el)) for el in at.markdown]
-    assert any("ACTIVE:NVDA" in t for t in texts)
+    assert at.session_state["active_ticker"] == "NVDA"
+    texts = [str(getattr(el, "value", el)) for el in list(at.markdown) + list(at.caption)]
+    assert any("ACTIVE:NVDA" in t or "Viewing NVDA" in t for t in texts)
 
 
 def test_import_ui_fund_view():

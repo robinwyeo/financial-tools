@@ -21,7 +21,8 @@ from ui.constants import BARGAIN_LABELS, FACTOR_LABELS, FUND_FACTOR_LABELS
 from ui.state import load_fund_universe_snapshot, load_universe_snapshot
 
 _MOS_ORDER = ("Low", "Medium", "High")
-_TICKER_KEY = "ticker"
+_ACTIVE_TICKER_KEY = "active_ticker"
+_TICKER_BOX_KEY = "ticker_box"
 _DEFAULT_TICKER = "AAPL"
 
 
@@ -193,26 +194,50 @@ def is_fund_ticker(ticker: str) -> bool:
     return get_security_type(ticker) in FUND_QUOTE_TYPES
 
 
-def _on_ticker_change() -> None:
-    st.session_state[_TICKER_KEY] = normalize_ticker(st.session_state.get(_TICKER_KEY))
+def _initial_ticker() -> str:
+    """One-time default. Do not re-read query params into value= on later reruns."""
+    raw = None
+    try:
+        raw = st.query_params.get("ticker")
+    except Exception:
+        raw = None
+    return normalize_ticker(raw) or _DEFAULT_TICKER
 
 
 def render_ticker_input() -> str:
-    """Ticker box with a stable key. Do not pass query params as value= each rerun."""
-    kwargs: dict = {
-        "label": "Ticker",
-        "value": _DEFAULT_TICKER,
-        "key": _TICKER_KEY,
-        "help": (
-            "Stocks, ETFs, and mutual funds (US and Canadian; use .TO for TSX listings). "
-            "Press Enter or click Load to apply."
-        ),
-        "on_change": _on_ticker_change,
-    }
-    if "bind" in inspect.signature(st.text_input).parameters:
-        kwargs["bind"] = "query-params"
-    ticker = normalize_ticker(st.text_input(**kwargs))
-    st.button("Load ticker", use_container_width=True)
+    """Commit ticker only on form submit so typing is not lost to a widget/URL fight.
+
+    Streamlit text_input does not apply until Enter/submit. Binding the same field
+    to query params (or passing value=AAPL every rerun) resets the box to AAPL.
+    Session state ``active_ticker`` is the name the rest of the app uses.
+    """
+    if _ACTIVE_TICKER_KEY not in st.session_state:
+        st.session_state[_ACTIVE_TICKER_KEY] = _initial_ticker()
+    if _TICKER_BOX_KEY not in st.session_state:
+        st.session_state[_TICKER_BOX_KEY] = st.session_state[_ACTIVE_TICKER_KEY]
+
+    form_kwargs: dict = {"border": False}
+    if "enter_to_submit" in inspect.signature(st.form).parameters:
+        form_kwargs["enter_to_submit"] = True
+
+    with st.form("ticker_form", **form_kwargs):
+        typed = st.text_input(
+            "Ticker",
+            key=_TICKER_BOX_KEY,
+            help=(
+                "Stocks, ETFs, and mutual funds (US and Canadian; use .TO for TSX listings). "
+                "Press Enter or click Load ticker."
+            ),
+        )
+        submitted = st.form_submit_button("Load ticker", use_container_width=True)
+
+    if submitted:
+        new = normalize_ticker(typed)
+        if new:
+            st.session_state[_ACTIVE_TICKER_KEY] = new
+
+    ticker = st.session_state[_ACTIVE_TICKER_KEY]
+    st.caption(f"Viewing {ticker}")
     return ticker
 
 

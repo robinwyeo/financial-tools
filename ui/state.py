@@ -41,7 +41,8 @@ def load_config() -> dict:
 def load_universe_snapshot() -> pd.DataFrame | None:
     mtime = STOCK_SNAPSHOT_PATH.stat().st_mtime if STOCK_SNAPSHOT_PATH.exists() else 0.0
 
-    def _inner(_mtime: float):
+    def _inner(snapshot_mtime: float):
+        del snapshot_mtime  # Included in Streamlit's cache key.
         return _load_uni_snap()
 
     return _cached("uni_snap", _inner)(mtime)
@@ -50,7 +51,8 @@ def load_universe_snapshot() -> pd.DataFrame | None:
 def load_fund_universe_snapshot() -> pd.DataFrame | None:
     mtime = FUND_SNAPSHOT_PATH.stat().st_mtime if FUND_SNAPSHOT_PATH.exists() else 0.0
 
-    def _inner(_mtime: float):
+    def _inner(snapshot_mtime: float):
+        del snapshot_mtime  # Included in Streamlit's cache key.
         return _load_fund_snap()
 
     return _cached("fund_snap", _inner)(mtime)
@@ -59,8 +61,9 @@ def load_fund_universe_snapshot() -> pd.DataFrame | None:
 def score_universe_cached(config: dict) -> pd.DataFrame:
     mtime = STOCK_SNAPSHOT_PATH.stat().st_mtime if STOCK_SNAPSHOT_PATH.exists() else 0.0
 
-    def _inner(_mtime: float, _config: dict):
-        return score_universe(_config)
+    def _inner(snapshot_mtime: float, scoring_config: dict):
+        del snapshot_mtime  # Included in Streamlit's cache key.
+        return score_universe(scoring_config)
 
     return _cached("score_uni", _inner)(mtime, config)
 
@@ -68,8 +71,9 @@ def score_universe_cached(config: dict) -> pd.DataFrame:
 def score_fund_universe_cached(config: dict) -> pd.DataFrame:
     mtime = FUND_SNAPSHOT_PATH.stat().st_mtime if FUND_SNAPSHOT_PATH.exists() else 0.0
 
-    def _inner(_mtime: float, _config: dict):
-        return score_fund_universe(_config)
+    def _inner(snapshot_mtime: float, scoring_config: dict):
+        del snapshot_mtime  # Included in Streamlit's cache key.
+        return score_fund_universe(scoring_config)
 
     return _cached("score_fund_uni", _inner)(mtime, config)
 
@@ -80,9 +84,10 @@ def score_ticker_cached(ticker: str, config: dict) -> dict:
     if snap is not None and not snap.empty and "snapshot_date" in snap.columns:
         date = str(snap["snapshot_date"].iloc[0])
 
-    def _inner(_ticker: str, _date: str, _config: dict):
+    def _inner(cache_ticker: str, snapshot_date: str, scoring_config: dict):
+        del snapshot_date  # Included in Streamlit's cache key.
         live_snap = _load_uni_snap()
-        return score_ticker(_ticker, _config, live_snap)
+        return score_ticker(cache_ticker, scoring_config, live_snap)
 
     return _cached("score_ticker", _inner, ttl=1800)(ticker, date, config)
 
@@ -94,16 +99,22 @@ def score_fund_cached(ticker: str, config: dict) -> dict:
         date = str(snap["snapshot_date"].iloc[0])
     mtime = FUND_SNAPSHOT_PATH.stat().st_mtime if FUND_SNAPSHOT_PATH.exists() else 0.0
 
-    def _inner(_ticker: str, _date: str, _mtime: float, _config: dict):
+    def _inner(
+        cache_ticker: str,
+        snapshot_date: str,
+        snapshot_mtime: float,
+        scoring_config: dict,
+    ):
+        del snapshot_date, snapshot_mtime  # Included in Streamlit's cache key.
         live_snap = _load_fund_snap()
-        return score_fund(_ticker, _config, live_snap)
+        return score_fund(cache_ticker, scoring_config, live_snap)
 
     return _cached("score_fund", _inner, ttl=1800)(ticker, date, mtime, config)
 
 
 def fetch_price_history(ticker: str, period: str = "2y") -> pd.DataFrame:
-    def _inner(_ticker: str, _period: str):
-        return _fetch_price_history(_ticker, period=_period)
+    def _inner(cache_ticker: str, cache_period: str):
+        return _fetch_price_history(cache_ticker, period=cache_period)
 
     return _cached("px", _inner, ttl=3600)(ticker, period)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import types
 
 import pandas as pd
@@ -29,6 +30,73 @@ def _install_identity_cache(monkeypatch):
     monkeypatch.setattr("streamlit.cache_data", fake_cache_data)
     state._CACHED.clear()
     return recorded_keys, inner_calls
+
+
+def _install_streamlit_like_cache(monkeypatch):
+    """Cache by non-underscore arguments, matching st.cache_data semantics."""
+    stores: list[dict[tuple, object]] = []
+
+    def fake_cache_data(*_args, **_kwargs):
+        def decorator(fn):
+            signature = inspect.signature(fn)
+            store: dict[tuple, object] = {}
+            stores.append(store)
+
+            def wrapped(*args):
+                bound = signature.bind(*args)
+                key = tuple(
+                    (name, repr(value))
+                    for name, value in bound.arguments.items()
+                    if not name.startswith("_")
+                )
+                if key not in store:
+                    store[key] = fn(*args)
+                return store[key]
+
+            return wrapped
+
+        return decorator
+
+    monkeypatch.setattr("streamlit.cache_data", fake_cache_data)
+    state._CACHED.clear()
+    return stores
+
+
+def test_score_ticker_cache_key_includes_ticker(monkeypatch):
+    """META/NVDA must not receive the first cached AAPL dashboard result."""
+    monkeypatch.setattr(state, "load_universe_snapshot", lambda: pd.DataFrame())
+    monkeypatch.setattr(state, "_load_uni_snap", lambda: pd.DataFrame())
+    calls: list[str] = []
+
+    def fake_score(ticker, config, snap):
+        calls.append(ticker)
+        return {"ticker": ticker}
+
+    monkeypatch.setattr(state, "score_ticker", fake_score)
+    _install_streamlit_like_cache(monkeypatch)
+
+    assert state.score_ticker_cached("AAPL", {})["ticker"] == "AAPL"
+    assert state.score_ticker_cached("META", {})["ticker"] == "META"
+    assert state.score_ticker_cached("NVDA", {})["ticker"] == "NVDA"
+    assert state.score_ticker_cached("META", {})["ticker"] == "META"
+    assert calls == ["AAPL", "META", "NVDA"]
+
+
+def test_price_history_cache_key_includes_ticker_and_period(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_history(ticker, period):
+        calls.append((ticker, period))
+        return pd.DataFrame({"ticker": [ticker], "period": [period]})
+
+    monkeypatch.setattr(state, "_fetch_price_history", fake_history)
+    _install_streamlit_like_cache(monkeypatch)
+
+    assert state.fetch_price_history("AAPL", "2y").iloc[0]["ticker"] == "AAPL"
+    assert state.fetch_price_history("META", "2y").iloc[0]["ticker"] == "META"
+    assert state.fetch_price_history("META", "1y").iloc[0]["period"] == "1y"
+    state.fetch_price_history("META", "2y")
+    assert calls == [("AAPL", "2y"), ("META", "2y"), ("META", "1y")]
 
 
 def test_score_fund_cached_different_mtimes_are_different_keys(monkeypatch):

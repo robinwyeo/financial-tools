@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 from typing import Any
@@ -14,7 +15,16 @@ logger = logging.getLogger(__name__)
 
 INSIDER_WINDOW_DAYS = 90
 CLUSTER_MIN_BUYERS = 2
+FORM4_CACHE_HOURS = 24
+FORM4_ERROR_CACHE_HOURS = 1
 _OPEN_MARKET = frozenset({"P", "S"})
+_XSL_PREFIX = re.compile(r"^xsl[^/]+/", re.IGNORECASE)
+
+
+def _raw_document_path(document: str) -> str:
+    """SEC lists the XSL-rendered HTML as primaryDocument; the raw XML is the same
+    path without the ``xsl…/`` prefix."""
+    return _XSL_PREFIX.sub("", document.strip())
 
 
 def _local(tag: str) -> str:
@@ -98,7 +108,7 @@ def _recent_form4_accessions(cik: int, since: date) -> list[dict[str, str]]:
         out.append(
             {
                 "accession": str(acc).replace("-", ""),
-                "document": str(doc),
+                "document": _raw_document_path(str(doc)),
                 "filed": str(filed)[:10],
             }
         )
@@ -109,10 +119,14 @@ def _recent_form4_accessions(cik: int, since: date) -> list[dict[str, str]]:
 
 def fetch_form4_transactions(ticker: str, *, days: int = INSIDER_WINDOW_DAYS) -> list[dict[str, Any]]:
     """Open-market Form 4 trades for ``ticker`` in the last ``days`` (cached 24h)."""
-    cache_path = _cache_key("form4", ticker.upper(), str(days))
-    cached = _read_cache(cache_path, max_age_hours=24)
+    cache_path = _cache_key("form4v2", ticker.upper(), str(days))
+    cached = _read_cache(cache_path, max_age_hours=FORM4_CACHE_HOURS)
     if cached is not None and isinstance(cached.get("transactions"), list):
-        return cached["transactions"]
+        if not cached.get("error"):
+            return cached["transactions"]
+        # Negative cache: honour only for the short TTL, then retry.
+        if _read_cache(cache_path, max_age_hours=FORM4_ERROR_CACHE_HOURS) is not None:
+            return cached["transactions"]
 
     cik = ticker_to_cik(ticker)
     if cik is None:
@@ -125,7 +139,7 @@ def fetch_form4_transactions(ticker: str, *, days: int = INSIDER_WINDOW_DAYS) ->
         filings = _recent_form4_accessions(cik, since)
     except Exception as exc:
         logger.warning("Form 4 index failed for %s: %s", ticker, exc)
-        _write_cache(cache_path, {"transactions": []})
+        _write_cache(cache_path, {"transactions": [], "error": True})
         return []
 
     for filing in filings:

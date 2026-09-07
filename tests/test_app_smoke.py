@@ -22,6 +22,25 @@ def test_import_ui_stock_view_without_running_app():
     assert hasattr(stock_view, "render_decision_card")
 
 
+def test_card_shell_is_usable_as_context_manager(monkeypatch):
+    """Regression: a bare generator is not a context manager (TypeError on Streamlit Cloud)."""
+    import ui.layout as layout
+
+    class FakeContainer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(layout.st, "container", lambda **_kwargs: FakeContainer())
+
+    with layout._card_shell(True):
+        pass
+    with layout._card_shell(False):
+        pass
+
+
 def test_import_ui_fund_view():
     import ui.fund_view as fund_view
 

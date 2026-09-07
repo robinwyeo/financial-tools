@@ -17,6 +17,7 @@ def _dashboard_row_anchor(row: int) -> None:
     )
 
 
+@contextmanager
 def _card_shell(bordered: bool) -> Iterator[None]:
     """Dashboard cards use column borders; standalone cards keep st.container(border=True)."""
     if bordered:

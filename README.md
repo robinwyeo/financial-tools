@@ -160,13 +160,13 @@ terminal-wealth simulation (those evaluate parameters on the same window used
 to choose them, and free price data excludes delisted tickers entirely, so
 strategy results are survivorship-biased upward).
 
-Evidence `run_id`: `2026-09-07T06:30:02Z`.
+Evidence `run_id`: `2026-09-07T06:12:44Z`.
 
 | Candidate | 3y IC | NW t | n independent windows | Block ROI |
 | --- | ---: | ---: | ---: | ---: |
-| evidence_based | 0.000 | — | 0.0 | -0.00% |
-| legacy_tuned | 0.000 | — | 0.0 | -0.00% |
-| equal | 0.000 | — | 0.0 | -0.00% |
+| evidence_based | 0.089 | 4.52 | 4.4 | 7.88% |
+| equal | 0.097 | 6.65 | 4.4 | 6.73% |
+| legacy_tuned | 0.087 | 7.87 | 4.4 | 2.36% |
 
 Block ROI is excess return inside each ≤2y walk-forward block, not 3-year excess.
 

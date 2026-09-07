@@ -1,6 +1,6 @@
 # Score Weight & Threshold Backtest Report
 
-Generated: 2026-09-07 07:13 UTC
+Generated: 2026-09-07 11:18 UTC
 
 ## Summary
 
@@ -23,13 +23,13 @@ Primary horizon: **3y**
 
 | Candidate | 3y IC | NW t | n windows | Block ROI | 95% CI | % blocks > 0 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| evidence_based | 0.000 | — | 0.0 | -0.00% | [-0.00%, 0.00%] | 20% |
-| legacy_tuned | 0.000 | — | 0.0 | -0.00% | [-0.00%, 0.00%] | 0% |
-| equal | 0.000 | — | 0.0 | -0.00% | [-0.00%, 0.00%] | 20% |
+| evidence_based | 0.089 | 4.52 | 4.4 | 7.88% | [-0.19%, 18.78%] | 67% |
+| equal | 0.097 | 6.65 | 4.4 | 6.73% | [0.27%, 13.70%] | 83% |
+| legacy_tuned | 0.087 | 7.87 | 4.4 | 2.36% | [-2.67%, 9.04%] | 50% |
 
 Block ROI is excess return of the gated DCA campaign inside each walk-forward block (≤ 2 years), not 3-year excess.
-- **evidence_based** vs **legacy_tuned**: indistinguishable (bootstrap CIs overlap).
 - **evidence_based** vs **equal**: indistinguishable (bootstrap CIs overlap).
+- **evidence_based** vs **legacy_tuned**: indistinguishable (bootstrap CIs overlap).
 
 ### Recommended factor weights
 
@@ -46,8 +46,8 @@ Block ROI is excess return of the gated DCA campaign inside each walk-forward bl
 ## Bargain Weight Validation
 
 - Winner: **default_long_horizon**
-- Winner mean IC (3y): 0.000
-- Baseline mean IC: 0.000
+- Winner mean IC (3y): -0.051
+- Baseline mean IC: -0.051
 
 ### Recommended bargain weights
 
@@ -60,40 +60,40 @@ Block ROI is excess return of the gated DCA campaign inside each walk-forward bl
 ## Threshold Calibration
 
 - Horizon: **3y**
-- composite_min: **50.0**
+- composite_min: **59.7**
 - bargain_min: **50.0**
 
 ## Investment Comparison vs S&P 500
 
 Each quarter, **$20,000** was invested into the top 5 good-buy stocks (old or new parameters). The benchmark invests the same **$20,000/quarter** into **SPY** (S&P 500 total return) on the identical schedule.
 
-- Simulation period: **2010-03-31 00:00:00** → **2012-12-31 00:00:00**
-- Quarters with investment: **12**
-- Total capital deployed (each strategy): **$240,000**
+- Simulation period: **2010-03-31 00:00:00** → **2026-03-31 00:00:00**
+- Quarters with investment: **65**
+- Total capital deployed (each strategy): **$1,300,000**
 
 ### Side-by-side results (in-sample, survivorship-biased)
 
 | Metric | Old params | New params | S&P 500 (SPY) |
 | --- | ---: | ---: | ---: |
-| Terminal wealth | $304,277 | $276,365 | $279,866 |
-| Total invested | $240,000 | $240,000 | $240,000 |
-| Total return | 26.8% | 15.2% | 16.6% |
-| CAGR | 9.0% | 5.3% | 5.7% |
-| Max drawdown | 0.0% | -1.2% | 0.0% |
+| Terminal wealth | $11,167,421 | $16,186,724 | $4,326,313 |
+| Total invested | $1,300,000 | $1,300,000 | $1,300,000 |
+| Total return | 759.0% | 1145.1% | 232.8% |
+| CAGR | 14.4% | 17.1% | 7.8% |
+| Max drawdown | -28.4% | -33.8% | -21.9% |
 
 ### Outperformance vs S&P 500
 
 | Comparison | Terminal wealth Δ | Return Δ | CAGR Δ | Higher ROI? |
 | --- | ---: | ---: | ---: | :---: |
-| Old params vs SPY | +$24,411 (+8.7%) | +10.2% | +3.3% | Yes |
-| New params vs SPY | −$3,501 (−1.3%) | −1.5% | −0.5% | No |
-| New params vs Old params | −$27,912 (−9.2%) | −11.6% | −3.7% | No |
+| Old params vs SPY | +$6,841,108 (+158.1%) | +526.2% | +6.6% | Yes |
+| New params vs SPY | +$11,860,411 (+274.1%) | +912.3% | +9.3% | Yes |
+| New params vs Old params | +$5,019,303 (+44.9%) | +386.1% | +2.7% | Yes |
 
 ### Interpretation
 
-- **Old parameters** finished +$24,411 ahead of SPY in terminal wealth; return on deployed capital was 26.8% (9.0% CAGR) vs SPY's 16.6% (5.7% CAGR).
-- **New parameters** finished −$3,501 behind SPY in terminal wealth; return on deployed capital was 15.2% (5.3% CAGR) vs SPY's 16.6% (5.7% CAGR).
-- **Old parameters** beat new parameters by +$27,912 terminal wealth and +11.6% higher return on deployed capital.
+- **Old parameters** finished +$6,841,108 ahead of SPY in terminal wealth; return on deployed capital was 759.0% (14.4% CAGR) vs SPY's 232.8% (7.8% CAGR).
+- **New parameters** finished +$11,860,411 ahead of SPY in terminal wealth; return on deployed capital was 1145.1% (17.1% CAGR) vs SPY's 232.8% (7.8% CAGR).
+- **New parameters** beat old parameters by +$5,019,303 terminal wealth and +386.1% higher return on deployed capital.
 
 ### Survivorship (price coverage of PIT constituents)
 

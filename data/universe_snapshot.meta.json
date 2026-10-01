@@ -1,8 +1,8 @@
 {
-  "snapshot_date": "2026-09-07T09:40:55.758695+00:00",
+  "snapshot_date": "2026-10-01T20:47:57.082081+00:00",
   "attempted": 503,
   "succeeded": 503,
   "failed": 0,
   "failures": [],
-  "path": "/Users/robinwyeo/Github/financial-tools/data/universe_snapshot.parquet"
+  "path": "/home/runner/work/financial-tools/financial-tools/data/universe_snapshot.parquet"
 }
